@@ -5,7 +5,7 @@ import subprocess
 
 
 # Настройки (изменён только этот URL)
-RADIO_URL = "https://myradio24.org/sintezi_128" # <-- Новый адрес!
+RADIO_URL = "https://listen7.myradio24.com/rockataka_128" # <-- Новый адрес!
 SESSION_DURATION_SECONDS = 1000 # Длительность одной сессии: ~16 мин 40 сек
 CONNECT_INTERVAL_SECONDS = 100 # Пауза перед повторным подключением: 1 мин 40 сек
 USER_AGENT = (
@@ -34,40 +34,36 @@ def main():
                         f"\nHeaders sent by server: {dict(response.headers)}"
                     )
                 
-                # Выводим информацию о старте для отладки
                 elapsed = int(time.time() - start_time)
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Session started ({elapsed}s). Connecting to '{RADIO_URL}'.")
 
-                # Запускаем плеер mpv без вывода звука (-no-video), но с попыткой воспроизведения.
                 player = subprocess.Popen([
                     "mpv",
-                    "--really-quiet", # Минимум логов
-                    "-no-video",      # Отключаем видео (если вдруг)
-                    "-"              # Читать данные из stdin
+                    "--really-quiet", 
+                    "-no-video", 
+                    "-"
                 ], stdin=subprocess.PIPE)
 
-                # Основной цикл чтения данных из потока
                 for chunk in response.iter_content(chunk_size=65536):
                     elapsed = int(time.time() - start_time)
                     
-                    # Проверяем длительность сессии
+                    # Завершаем сессию через SESSION_DURATION_SECONDS
                     if elapsed >= SESSION_DURATION_SECONDS:
-                        break # Завершаем чтение после заданного времени
+                        break
 
                     # Если сервер закрыл соединение раньше времени
                     if chunk is None or len(chunk) == 0:
-                        print(f"[{datetime.now().strftime('%H:%M:%S')}] Stream closed by server after {elapsed} seconds.")
+                        print(f"[{datetime.now().%H:%M:%S}] Stream closed by server after {elapsed} seconds.")
                         break
 
                     player.stdin.write(chunk)
                     player.stdin.flush()
 
         except Exception as e:
-            # Выводим полное сообщение об ошибке
             print(f"[{datetime.now().strftime('%H:%M:%S')}] [ERROR] {e}")
             
         finally:
-            # Завершаем процесс плеера
+            # Ждём завершения плеера или завершаем его принудительно
             if player.poll() is None:
                 player.terminate()
                 player.wait(timeout=5)
