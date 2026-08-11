@@ -4,10 +4,10 @@ import time
 import subprocess
 
 
-# Настройки
-RADIO_URL = 'https://listen7.myradio24.com/sintezi'
-SESSION_DURATION_SECONDS = 900 # ~15 минут. Попробуйте начать с этого значения.
-CONNECT_INTERVAL_SECONDS = 180 # Пауза между попытками: 3 минуты.
+# Настройки (измените URL на нужный вам)
+RADIO_URL = 'https://listen7.myradio24.com/sintezi' # <-- Ваш поток
+SESSION_DURATION_SECONDS = 900   # Длительность одной сессии: ~15 минут
+CONNECT_INTERVAL_SECONDS = 180  # Пауза между попытками: 3 минуты
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
@@ -34,8 +34,9 @@ def keep_radio_alive():
                     f"\nHeaders sent by server: {dict(response.headers)}"
                 )
             
+            # ВАЖНО! Правильная команда для mpv с флагом --quiet.
             player = subprocess.Popen([
-                'mpv', '--no-video', '--really-quiet', '-'], 
+                'mpv', '--no-video', '--quiet', '-'], 
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
@@ -47,7 +48,7 @@ def keep_radio_alive():
             for chunk in response.iter_content(chunk_size=buffer_size):
                 elapsed = int(time.time() - start_time)
                 
-                # **КРИТИЧЕСКИЙ МОМЕНТ**: завершаем сессию по таймеру!
+                # Завершаем сессию по таймеру!
                 if elapsed >= SESSION_DURATION_SECONDS:
                     break # Выход из цикла -> конец сессии
 
