@@ -1,12 +1,3 @@
-import requests
-import subprocess
-import time
-
-# Ваша прямая ссылка на поток от MyRadio24
-RADIO_URL = 'https://listen7.myradio24.com/sintezi'
-SESSION_DURATION_SECONDS = 900 # ~15 минут. Оставляем без изменений!
-# CONNECT_INTERVAL_SECONDS убираем, он нам больше не нужен
-
 def keep_radio_alive():
     print(f"[{time.strftime('%H:%M:%S')}] Starting listener for {RADIO_URL}...")
     
@@ -15,55 +6,55 @@ def keep_radio_alive():
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
         ),
-        'Icy-MetaData': '1' # Для получения метаданных
+        'Icy-MetaData': '1'
     }
 
     try:
         with requests.get(RADIO_URL, stream=True, timeout=20, headers=headers) as response:
-            response.raise_for_status()
-            
-            start_time = time.time() # Начало сессии
+            #### МИНИМАЛЬНОЕ ИЗМЕНЕНИЕ ####
+            # Добавляем начало отсчёта времени для каждой новой сессии
+            start_time = time.time() 
 
-            player = subprocess.Popen(
-                ['mpv', '--no-video', '--quiet', '-'],
+            if not response.ok or 'location' in response.headers:
+                raise Exception(
+                    f"HTTP Error {response.status_code}: {response.reason}. "
+                    f"\nURL: {RADIO_URL}"
+                    f"\nHeaders sent by server: {dict(response.headers)}"
+                )
+            
+            player = subprocess.Popen([
+                'mpv', '--no-video', '--quiet', '-'],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            
+
             buffer_size = 65536  
             
-            #### МИНИМАЛЬНОЕ ИЗМЕНЕНИЕ ####
-            # Добавим маленькую задержку внутри цикла, чтобы не грузить CPU.
-            # Сервер всё равно отдаёт поток пакетами, поэтому можно подождать.
+            #### КЛЮЧЕВАЯ ПРАВКА ###
+            # Внутри основного цикла мы проверяем длительность текущей сессии
             for chunk in response.iter_content(chunk_size=buffer_size):
-                if not chunk:
-                    break
-
                 elapsed = int(time.time() - start_time)
                 
-                # Завершаем сессию через SESSION_DURATION_SECONDS
+                # Завершаем сессию после SESSION_DURATION_SECONDS
                 if elapsed >= SESSION_DURATION_SECONDS:
-                    print(f"[{time.strftime('%H:%M:%S')}] Session ended after {elapsed}s.")
+                    print(f"[{datetime.now():%H:%M:%S}] Session ended after {elapsed} seconds.")
                     break # Выход из цикла -> конец сессии
 
-                # Передаём данные в mpv
-                try:
-                    player.stdin.write(chunk)
-                except BrokenPipeError:
+                # Если сервер закрыл соединение раньше времени
+                if not chunk:
+                    print(f"[{datetime.now():%H:%M:%S}] Stream closed by server after {elapsed} seconds.")
                     break
 
-                #### ВАЖНЫЙ МОМЕНТ ####
-                # Делаем крошечную паузу в цикле, чтобы дать системе передышку.
-                # Без этой задержки скрипт может потреблять слишком много ресурсов.
-                time.sleep(0.1) # Пауза в 100 миллисекунд
+                player.stdin.write(chunk)
+                player.stdin.flush()
 
                 # Дополнительная проверка: если mpv завершился сам
                 if player.poll() is not None:
                     break
 
     except requests.exceptions.RequestException as e:
-        print(f"Connection error: {e}. Reconnecting immediately...") # Немедленно пытаемся снова
+        print(f"[{datetime.now():%H:%M:%S}] Connection error: {e}. Reconnecting immediately...")
         
     finally:
         # Завершаем процесс плеера
@@ -73,7 +64,3 @@ def keep_radio_alive():
                 player.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 player.kill()
-
-if __name__ == '__main__':
-    while True:
-        keep_radio_alive()
