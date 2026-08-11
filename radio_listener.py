@@ -3,21 +3,19 @@ import subprocess
 import time
 
 # Ваша прямая ссылка на поток от MyRadio24
-RADIO_URL = 'https://listen7.myradio24.com/rockataka_128' # <-- Ваш поток!
-SESSION_DURATION_SECONDS = 900   # Длительность одной сессии: ~15 минут
-#### МИНИМАЛЬНОЕ ИЗМЕНЕНИЕ ####
-# Возвращаем константу для паузы между попытками
-CONNECT_INTERVAL_SECONDS = 180  # Пауза между попытками: 3 минуты
+RADIO_URL = 'https://listen7.myradio24.com/sintezi'
+SESSION_DURATION_SECONDS = 900 # ~15 минут. Оставляем без изменений!
+# CONNECT_INTERVAL_SECONDS убираем, он нам больше не нужен
 
 def keep_radio_alive():
-    print(f"[{datetime.now():%H:%M:%S}] Starting listener for {RADIO_URL}...")
+    print(f"[{time.strftime('%H:%M:%S')}] Starting listener for {RADIO_URL}...")
     
     headers = {
         'User-Agent': (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
         ),
-        'Icy-MetaData': '1'
+        'Icy-MetaData': '1' # Для получения метаданных
     }
 
     try:
@@ -32,27 +30,32 @@ def keep_radio_alive():
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-
+            
             buffer_size = 65536  
             
-            #### ВАЖНЫЙ МОМЕНТ ###
-            # Мы НЕ добавляем проверку времени внутри этого цикла!
-            # Таймер должен быть снаружи.
+            #### МИНИМАЛЬНОЕ ИЗМЕНЕНИЕ ####
+            # Добавим маленькую задержку внутри цикла, чтобы не грузить CPU.
+            # Сервер всё равно отдаёт поток пакетами, поэтому можно подождать.
             for chunk in response.iter_content(chunk_size=buffer_size):
                 if not chunk:
                     break
 
                 elapsed = int(time.time() - start_time)
                 
+                # Завершаем сессию через SESSION_DURATION_SECONDS
+                if elapsed >= SESSION_DURATION_SECONDS:
+                    print(f"[{time.strftime('%H:%M:%S')}] Session ended after {elapsed}s.")
+                    break # Выход из цикла -> конец сессии
+
                 # Передаём данные в mpv
                 try:
                     player.stdin.write(chunk)
                 except BrokenPipeError:
                     break
 
-                #### КЛЮЧЕВАЯ ПРАВКА! ###
+                #### ВАЖНЫЙ МОМЕНТ ####
                 # Делаем крошечную паузу в цикле, чтобы дать системе передышку.
-                # Без этой задержки скрипт может потреблять слишком много ресурсов CPU.
+                # Без этой задержки скрипт может потреблять слишком много ресурсов.
                 time.sleep(0.1) # Пауза в 100 миллисекунд
 
                 # Дополнительная проверка: если mpv завершился сам
@@ -60,7 +63,7 @@ def keep_radio_alive():
                     break
 
     except requests.exceptions.RequestException as e:
-        print(f"Connection error: {e}. Reconnecting immediately...") 
+        print(f"Connection error: {e}. Reconnecting immediately...") # Немедленно пытаемся снова
         
     finally:
         # Завершаем процесс плеера
@@ -70,10 +73,7 @@ def keep_radio_alive():
                 player.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 player.kill()
-        
-        #### МИНИМАЛЬНОЕ ИЗМЕНЕНИЕ №2 ####
-        elapsed_session = int(time.time() - start_time)
-        wait_seconds = max(0, CONNECT_INTERVAL_SECONDS - elapsed_session)
-        print(f"[{datetime.now():%H:%M:%S}] Session ended ({elapsed_session}s). Waiting for {wait_seconds}s before reconnecting to '{RADIO_URL}'.")
-        #### ВАЖНЫЙ МОМЕНТ — ЖДЁМ ЗАДЕРЖКУ ВНЕ ЦИКЛА ПРОИЗВОДСТВА ДАННЫХ ####
-        time.sleep(wait_seconds)
+
+if __name__ == '__main__':
+    while True:
+        keep_radio_alive()
