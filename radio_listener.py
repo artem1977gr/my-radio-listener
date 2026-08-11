@@ -5,9 +5,9 @@ import subprocess
 
 
 # Настройки (измените URL на нужный вам)
-RADIO_URL = 'https://listen7.myradio24.com/sintezi'
-SESSION_DURATION_SECONDS = 900 # Длительность одной сессии: ~15 минут
-CONNECT_INTERVAL_SECONDS = 180 # Пауза между попытками: 3 минуты
+RADIO_URL = 'https://listen7.myradio24.com/rockataka_128' # <-- Ваш поток!
+SESSION_DURATION_SECONDS = 900   # Длительность одной сессии: ~15 минут
+CONNECT_INTERVAL_SECONDS = 180  # Пауза между попытками: 3 минуты
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -43,14 +43,22 @@ def keep_radio_alive():
 
             buffer_size = 65536  
             
-            #### ВАЖНЫЙ МОМЕНТ! ###
-            # Мы НЕ добавляем проверку времени внутри этого цикла!
             for chunk in response.iter_content(chunk_size=buffer_size):
+                elapsed = int(time.time() - start_time)
+                
+                # Если сервер закрыл соединение раньше времени или данных нет
                 if not chunk:
+                    print(f"[{datetime.now():%H:%M:%S}] Stream closed by server after {elapsed} seconds.")
                     break
 
                 player.stdin.write(chunk)
                 player.stdin.flush()
+
+                #### КЛЮЧЕВАЯ ПРАВКА! ###
+                # Делаем крошечную паузу в цикле, чтобы дать системе передышку.
+                # Без этой задержки скрипт может потреблять слишком много ресурсов процессора.
+                #### МИНИМАЛЬНАЯ ПРАВКА №7 ####
+                time.sleep(0.1) # Пауза в 100 миллисекунд
 
                 # Дополнительная проверка: если mpv завершился сам
                 if player.poll() is not None:
@@ -72,5 +80,5 @@ def keep_radio_alive():
         elapsed_session = int(time.time() - start_time)
         wait_seconds = max(0, CONNECT_INTERVAL_SECONDS - elapsed_session)
         print(f"[{datetime.now():%H:%M:%S}] Session ended ({elapsed_session}s). Waiting for {wait_seconds}s before reconnecting to '{RADIO_URL}'.")
-        #### КЛЮЧЕВАЯ ЧАСТЬ — ЖДЁМ ЗАДЕРЖКУ ВНЕ ЦИКЛА ПРОИЗВОДСТВА ДАННЫХ ####
+        #### ВАЖНЫЙ МОМЕНТ — ЖДЁМ ЗАДЕРЖКУ ВНЕ ЦИКЛА ПРОИЗВОДСТВА ДАННЫХ ####
         time.sleep(wait_seconds)
