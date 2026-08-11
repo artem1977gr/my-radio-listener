@@ -1,5 +1,5 @@
 import requests
-from datetime import datetime # <--- Я добавил эту строку!
+from datetime import datetime
 import time
 import subprocess
 
@@ -7,10 +7,8 @@ import subprocess
 # Настройки (измените URL на нужный вам)
 RADIO_URL = 'https://listen7.myradio24.com/rockataka_128'  # <-- Ваш поток!
 SESSION_DURATION_SECONDS = 900   # Длительность одной сессии: ~15 минут
-CONNECT_INTERVAL_SECONDS = 600  # Пауза между попытками: 10 минут! 
-                               # Попробуйте начать с этого значения.
-                               # Если слушатель всё равно будет мигать,
-                               # увеличьте до 1800 (30 мин).
+CONNECT_INTERVAL_SECONDS = 600  # Это значение больше не важно,
+                               # так как ниже мы задаём фиксированный минимум.
 
 def keep_radio_alive():
     print(f"[{datetime.now():%H:%M:%S}] Starting listener for {RADIO_URL}...")
@@ -53,10 +51,10 @@ def keep_radio_alive():
                 except BrokenPipeError:
                     break
 
-                #### КЛЮЧЕВАЯ ПРАВКА! ###
+                #### КЛЮЧЕВАЯ ПРАВКА ####
                 # Делаем крошечную паузу в цикле, чтобы дать системе передышку.
                 # Без этой задержки скрипт может потреблять слишком много ресурсов CPU.
-                time.sleep(0.1) # Пауза в 100 миллисекунд
+                time.sleep(0.1) # <--- Оставляем эту паузу маленькой!
 
                 # Дополнительная проверка: если mpv завершился сам
                 if player.poll() is not None:
@@ -74,16 +72,12 @@ def keep_radio_alive():
             except subprocess.TimeoutExpired:
                 player.kill()
         
-        #### МИНИМАЛЬНОЕ ИЗМЕНЕНИЕ ####
-        elapsed_session = int(time.time() - start_time)
-        wait_seconds = max(0, CONNECT_INTERVAL_SECONDS - elapsed_session)
-
-        #### ГАРАНТИРОВАННАЯ ЗАДЕРЖКА ####
-        # Сервер MyRadio24 требует реальных пауз между сессиями.
-        # Даже если текущая сессия длилась дольше положенного,
-        # мы всё равно делаем фиксированный перерыв.
-        if wait_seconds <= 0 or elapsed_session == 0:
-            wait_seconds = CONNECT_INTERVAL_SECONDS
+        #### МИНИМАЛЬНОЕ ИЗМЕНЕНИЕ №16 ####
+        # Гарантированная большая пауза между сессиями.
+        # Сервер MyRadio24 требует реальных перерывов.
+        MIN_PAUSE_SECONDS = 600  # 10 минут! <--- Вот она, твоя идея!
+                           # Можно увеличить до 1800 (30 мин)!
+        wait_seconds = max(MIN_PAUSE_SECONDS, CONNECT_INTERVAL_SECONDS)
 
         print(f"[{datetime.now():%H:%M:%S}] Session ended ({elapsed_session}s). Waiting for {wait_seconds}s before reconnecting to '{RADIO_URL}'.")
         #### ЭТО САМОЕ ГЛАВНОЕ — ЖДЁМ ЗАДЕРЖКУ ВНЕ ЦИКЛА ПРОИЗВОДСТВА ДАННЫХ ####
