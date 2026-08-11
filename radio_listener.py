@@ -19,7 +19,6 @@ headers = {
 
 def main():
     """Основной цикл прослушивания."""
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Starting listener service...")
     
     while True:
         start_time = time.time()
@@ -29,13 +28,13 @@ def main():
                 # Проверяем ответ сервера ДО начала работы с данными
                 if not response.ok or 'location' in response.headers:
                     raise Exception(
-                        f"HTTP Error {response.status_code}: {response.reason}."
+                        f"[{datetime.now():%H:%M:%S}] HTTP Error {response.status_code}: {response.reason}."
                         f"\nURL: {RADIO_URL}"
                         f"\nHeaders sent by server: {dict(response.headers)}"
                     )
                 
                 elapsed = int(time.time() - start_time)
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] Session started ({elapsed}s). Connecting to '{RADIO_URL}'.")
+                print(f"[{datetime.now():%H:%M:%S}] Session started ({elapsed}s). Connecting to '{RADIO_URL}'.")
 
                 player = subprocess.Popen([
                     "mpv",
@@ -53,14 +52,14 @@ def main():
 
                     # Если сервер закрыл соединение раньше времени
                     if chunk is None or len(chunk) == 0:
-                        print(f"[{datetime.now().%H:%M:%S}] Stream closed by server after {elapsed} seconds.")
+                        print(f"[{datetime.now():%H:%M:%S}] Stream closed by server after {elapsed} seconds.")
                         break
 
                     player.stdin.write(chunk)
                     player.stdin.flush()
 
         except Exception as e:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] [ERROR] {e}")
+            print(f"[{datetime.now():%H:%M:%S}] [ERROR] {e}")
             
         finally:
             # Ждём завершения плеера или завершаем его принудительно
@@ -71,7 +70,7 @@ def main():
             # Делаем паузу до следующего запуска
             elapsed_session = int(time.time() - start_time)
             wait_seconds = max(0, CONNECT_INTERVAL_SECONDS - elapsed_session)
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Session ended ({elapsed_session}s). Waiting for {wait_seconds}s before reconnecting to '{RADIO_URL}'.")
+            print(f"[{datetime.now():%H:%M:%S}] Session ended ({elapsed_session}s). Waiting for {wait_seconds}s before reconnecting to '{RADIO_URL}'.")
             time.sleep(wait_seconds)
 
 
