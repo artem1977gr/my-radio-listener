@@ -4,6 +4,7 @@ import time
 
 # Ваша прямая ссылка на поток от MyRadio24
 RADIO_URL = 'https://listen7.myradio24.com/sintezi'
+SESSION_DURATION_SECONDS = 900 # ~15 минут. Минимальная правка!
 
 def keep_radio_alive():
     print(f"[{time.strftime('%H:%M:%S')}] Starting listener for {RADIO_URL}...")
@@ -18,6 +19,9 @@ def keep_radio_alive():
         with requests.get(RADIO_URL, stream=True, timeout=20, headers=headers) as response:
             response.raise_for_status()
             
+            #### МИНИМАЛЬНОЕ ИЗМЕНЕНИЕ ####
+            start_time = time.time() # Начало сессии
+
             player = subprocess.Popen(
                 ['mpv', '--no-video', '--quiet', '-'],
                 stdin=subprocess.PIPE,
@@ -34,6 +38,12 @@ def keep_radio_alive():
                     except BrokenPipeError:
                         break
                 
+                #### МИНИМАЛЬНОЕ ИЗМЕНЕНИЕ ####
+                elapsed = int(time.time() - start_time)
+                # Завершаем сессию через SESSION_DURATION_SECONDS
+                if elapsed >= SESSION_DURATION_SECONDS:
+                    break # Выход из цикла -> конец сессии
+
                 if player.poll() is not None:
                     break
                     
