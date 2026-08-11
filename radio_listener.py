@@ -41,8 +41,11 @@ def keep_radio_alive():
                 stderr=subprocess.DEVNULL
             )
 
-            buffer_size = 65536  
-            
+            #### МИНИМАЛЬНАЯ ПРАВКА №8 ###
+            # Увеличиваем размер буфера для более стабильного потока данных.
+            buffer_size = 131072  # Было 65536, стало 128 КБ вместо 64 КБ
+            # Вы можете попробовать ещё больше: 262144 (256 КБ).
+
             for chunk in response.iter_content(chunk_size=buffer_size):
                 elapsed = int(time.time() - start_time)
                 
@@ -53,12 +56,6 @@ def keep_radio_alive():
 
                 player.stdin.write(chunk)
                 player.stdin.flush()
-
-                #### КЛЮЧЕВАЯ ПРАВКА! ###
-                # Делаем крошечную паузу в цикле, чтобы дать системе передышку.
-                # Без этой задержки скрипт может потреблять слишком много ресурсов процессора.
-                #### МИНИМАЛЬНАЯ ПРАВКА №7 ####
-                time.sleep(0.1) # Пауза в 100 миллисекунд
 
                 # Дополнительная проверка: если mpv завершился сам
                 if player.poll() is not None:
