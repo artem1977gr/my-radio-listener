@@ -5,7 +5,7 @@ import subprocess
 
 
 # Настройки
-RADIO_URL = "https://myradio24.org/iridium" # <-- Новый адрес!
+RADIO_URL = "https://myradio24.org/iridium"
 SESSION_DURATION_SECONDS = 1000 # Длительность одной сессии: ~16 мин 40 сек
 CONNECT_INTERVAL_SECONDS = 100 # Пауза перед повторным подключением: 1 мин 40 сек
 USER_AGENT = (
@@ -26,21 +26,23 @@ def main():
         
         try:
             with requests.get(RADIO_URL, stream=True, timeout=20, headers=headers) as response:
-                if not response.ok:
+                # Проверяем ответ сервера ДО начала работы с данными
+                if not response.ok or 'location' in response.headers:
                     raise Exception(
                         f"HTTP Error {response.status_code}: {response.reason}."
                         f"\nURL: {RADIO_URL}"
-                        f"\nHeaders: {headers}"
+                        f"\nHeaders sent by server: {dict(response.headers)}"
                     )
                 
+                # Запускаем плеер mpv без вывода звука (-no-video), но с попыткой воспроизведения.
                 player = subprocess.Popen([
                     "mpv",
-                    "--really-quiet", 
-                    "-novideo", 
-                    "-no-audio",
-                    "-"
+                    "--really-quiet", # Минимум логов
+                    "-no-video",      # Отключаем видео (если вдруг)
+                    "-"              # Читать данные из stdin
                 ], stdin=subprocess.PIPE)
 
+                # Основной цикл чтения данных из потока
                 for chunk in response.iter_content(chunk_size=65536):
                     elapsed = int(time.time() - start_time)
                     
@@ -57,6 +59,7 @@ def main():
                     player.stdin.flush()
 
         except Exception as e:
+            # Выводим полное сообщение об ошибке
             print(f"[{datetime.now().strftime('%H:%M:%S')}] [ERROR] {e}")
             
         finally:
