@@ -4,8 +4,8 @@ import time
 import subprocess
 
 
-# Настройки
-RADIO_URL = "https://myradio24.org/iridium"
+# Настройки (изменён только этот URL)
+RADIO_URL = "https://myradio24.org/sintezi_128" # <-- Новый адрес!
 SESSION_DURATION_SECONDS = 1000 # Длительность одной сессии: ~16 мин 40 сек
 CONNECT_INTERVAL_SECONDS = 100 # Пауза перед повторным подключением: 1 мин 40 сек
 USER_AGENT = (
@@ -34,6 +34,10 @@ def main():
                         f"\nHeaders sent by server: {dict(response.headers)}"
                     )
                 
+                # Выводим информацию о старте для отладки
+                elapsed = int(time.time() - start_time)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Session started ({elapsed}s). Connecting to '{RADIO_URL}'.")
+
                 # Запускаем плеер mpv без вывода звука (-no-video), но с попыткой воспроизведения.
                 player = subprocess.Popen([
                     "mpv",
