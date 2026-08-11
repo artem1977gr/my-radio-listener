@@ -5,13 +5,12 @@ from datetime import datetime
 
 
 # URL вашего потока от MyRadio24
-RADIO_URL = 'https://listen7.myradio24.com/sintezi'
+RADIO_URL = 'https://listen7.myradio23.com/sintezi'
+SESSION_DURATION_SECONDS = 300  # 5 минут
+CONNECT_INTERVAL_SECONDS = 180  # Интервал между попытками: 3 минуты
 
 def keep_radio_alive():
-    """Функция для имитации непрерывного прослушивания."""
-    
-    # Время начала текущей сессии
-    session_start_time = time.time()
+    """Поддерживает активное подключение к радиопотоку."""
     
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Starting listener for {RADIO_URL}...")
     
@@ -22,28 +21,26 @@ def keep_radio_alive():
 
     try:
         with requests.get(RADIO_URL, stream=True, timeout=20, headers=headers) as response:
-            response.raise_for_status()  # Проверяем статус ответа
-
-            # Запускаем mpv с уменьшенным буфером (~8 КБ)
+            response.raise_for_status()
+            
             player = subprocess.Popen(
                 ['mpv', '--no-video', '--quiet', '-'],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                bufsize=8 * 1024  
+                bufsize=65536 * 2  # Буфер ~128 КБ
             )
             
-            buffer_size = 65536 
-
-            # Основной цикл загрузки
+            start_time = time.time()
+            
             while True:
-                elapsed = int(time.time() - session_start_time)
+                elapsed = int(time.time() - start_time)
                 
-                # Если прошло больше 2 часов, завершаем сессию
-                if elapsed > 7200:  # 2 часа в секундах
+                # Проверяем, прошло ли нужное время сессии
+                if elapsed >= SESSION_DURATION_SECONDS:
                     break
                     
-                chunk = next(response.iter_content(chunk_size=buffer_size), None)
+                chunk = next(response.iter_content(chunk_size=65536), None)
                 if not chunk or player.poll() is not None:
                     break
                 
@@ -53,8 +50,7 @@ def keep_radio_alive():
                     break
 
     except requests.exceptions.RequestException as e:
-        print(f"Connection error: {e}. Reconnecting in 60 seconds...")
-        time.sleep(60)  # Ждём минуту перед повторной попыткой
+        print(f"Connection error: {e}. Reconnecting immediately.")
         
     finally:
         # Завершаем процесс mpv
@@ -68,7 +64,5 @@ def keep_radio_alive():
 if __name__ == '__main__':
     while True:
         keep_radio_alive()
-        
-        # Пауза между сессиями, чтобы избежать блокировок
-        print("Session ended. Waiting before reconnecting...")
-        time.sleep(300)  # Паузы в 5 минут (300 секунд)
+        # Ждём перед следующей попыткой подключения
+        time.sleep(CONNECT_INTERVAL_SECONDS)
