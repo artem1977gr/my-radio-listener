@@ -1,68 +1,76 @@
 import requests
-import subprocess
-import time
 from datetime import datetime
+import time
+import subprocess
 
 
-# URL вашего потока от MyRadio24
-RADIO_URL = 'https://listen7.myradio23.com/sintezi'
-SESSION_DURATION_SECONDS = 300  # 5 минут
-CONNECT_INTERVAL_SECONDS = 180  # Интервал между попытками: 3 минуты
+# Настройки
+RADIO_URL = "https://myradio24.org/iridium" # <-- Новый адрес!
+SESSION_DURATION_SECONDS = 1000 # Длительность одной сессии: ~16 мин 40 сек
+CONNECT_INTERVAL_SECONDS = 100 # Пауза перед повторным подключением: 1 мин 40 сек
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+)
+headers = {
+    'User-Agent': USER_AGENT,
+}
 
-def keep_radio_alive():
-    """Поддерживает активное подключение к радиопотоку."""
+
+def main():
+    """Основной цикл прослушивания."""
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Starting listener service...")
     
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] Starting listener for {RADIO_URL}...")
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Icy-MetaData': '1'  # Поддержка метаданных Icecast
-    }
-
-    try:
-        with requests.get(RADIO_URL, stream=True, timeout=20, headers=headers) as response:
-            response.raise_for_status()
-            
-            player = subprocess.Popen(
-                ['mpv', '--no-video', '--quiet', '-'],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                bufsize=65536 * 2  # Буфер ~128 КБ
-            )
-            
-            start_time = time.time()
-            
-            while True:
-                elapsed = int(time.time() - start_time)
-                
-                # Проверяем, прошло ли нужное время сессии
-                if elapsed >= SESSION_DURATION_SECONDS:
-                    break
-                    
-                chunk = next(response.iter_content(chunk_size=65536), None)
-                if not chunk or player.poll() is not None:
-                    break
-                
-                try:
-                    player.stdin.write(chunk)
-                except BrokenPipeError:
-                    break
-
-    except requests.exceptions.RequestException as e:
-        print(f"Connection error: {e}. Reconnecting immediately.")
+    while True:
+        start_time = time.time()
         
-    finally:
-        # Завершаем процесс mpv
-        if 'player' in locals() and player.poll() is None:
-            player.terminate()
-            try:
+        try:
+            with requests.get(RADIO_URL, stream=True, timeout=20, headers=headers) as response:
+                if not response.ok:
+                    raise Exception(
+                        f"HTTP Error {response.status_code}: {response.reason}."
+                        f"\nURL: {RADIO_URL}"
+                        f"\nHeaders: {headers}"
+                    )
+                
+                player = subprocess.Popen([
+                    "mpv",
+                    "--really-quiet", 
+                    "-novideo", 
+                    "-no-audio",
+                    "-"
+                ], stdin=subprocess.PIPE)
+
+                for chunk in response.iter_content(chunk_size=65536):
+                    elapsed = int(time.time() - start_time)
+                    
+                    # Проверяем длительность сессии
+                    if elapsed >= SESSION_DURATION_SECONDS:
+                        break # Завершаем чтение после заданного времени
+
+                    # Если сервер закрыл соединение раньше времени
+                    if chunk is None or len(chunk) == 0:
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] Stream closed by server after {elapsed} seconds.")
+                        break
+
+                    player.stdin.write(chunk)
+                    player.stdin.flush()
+
+        except Exception as e:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] [ERROR] {e}")
+            
+        finally:
+            # Завершаем процесс плеера
+            if player.poll() is None:
+                player.terminate()
                 player.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                player.kill()
+
+            # Делаем паузу до следующего запуска
+            elapsed_session = int(time.time() - start_time)
+            wait_seconds = max(0, CONNECT_INTERVAL_SECONDS - elapsed_session)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Session ended ({elapsed_session}s). Waiting for {wait_seconds}s before reconnecting to '{RADIO_URL}'.")
+            time.sleep(wait_seconds)
+
 
 if __name__ == '__main__':
-    while True:
-        keep_radio_alive()
-        # Ждём перед следующей попыткой подключения
-        time.sleep(CONNECT_INTERVAL_SECONDS)
+    main()
