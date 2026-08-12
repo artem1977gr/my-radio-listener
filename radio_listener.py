@@ -1,7 +1,8 @@
 import requests
 import subprocess
 import time
-from multiprocessing import Process # Многопроцессность для запуска нескольких станций параллельно
+from multiprocessing import Process
+import random
 
 # Список URL радиостанций (добавлены твои новые потоки)
 RADIOS = [
@@ -13,6 +14,34 @@ RADIOS = [
     'https://listen7.myradio24.com/nevermind'
 ]
 SESSION_DURATION_SECONDS = 300 
+
+# Ссылка на "сырой" файл со списком HTTP-прокси на GitHub
+GITHUB_PROXY_SOURCE = 'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt'
+
+def fetch_proxies_from_github():
+    """Загружает список прокси в формате IP:PORT напрямую из репозитория."""
+    proxies = []
+    try:
+        response = requests.get(GITHUB_PROXY_SOURCE, timeout=10)
+        response.raise_for_status()
+        
+        for line in response.text.splitlines():
+            line = line.strip()
+            # Пропускаем комментарии и пустые строки
+            if not line or line.startswith('#'):
+                continue
+            
+            # Убираем протокол, если он вдруг есть в файле, оставляем чистый ip:port
+            clean_line = line.replace('http://', '').replace('https://', '')
+            
+            # Добавляем http:// для библиотеки requests, проверяя базовый формат
+            if ':' in clean_line and clean_line.count(':') == 1:
+                proxies.append(f"http://{clean_line}")
+                
+    except Exception as e:
+        print(f"[{time.strftime('%H:%M:%S')}] Ошибка при загрузке прокси с GitHub: {e}")
+        
+    return proxies
 
 def keep_radio_alive(url):
     """Функция виртуального слушателя для одной радиостанции."""
@@ -27,8 +56,25 @@ def keep_radio_alive(url):
         'Icy-MetaData': '1'
     }
 
+    # --- ИЗМЕНЕННЫЙ БЛОК ---
+    # Получаем свежий список прямо перед запуском каждого отдельного процесса
+    proxy_list = fetch_proxies_from_github()
+    
+    # Выбираем один случайный прокси для этой конкретной сессии
+    current_proxy_address = random.choice(proxy_list) if proxy_list else None
+    
+    # Формируем словарь только если адрес найден
+    proxies = {"http": current_proxy_address, "https": current_proxy_address} if current_proxy_address else None
+    
+    # Для отладки: можно раскомментировать, чтобы видеть выбранный IP
+    # if current_proxy_address:
+    #     print(f"[{time.strftime('%H:%M:%S')}] Listener for {url} will use proxy: {current_proxy_address}")
+    # else:
+    #     print(f"[{time.strftime('%H:%M:%S')}] Listener for {url} will use direct connection.")
+    # --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
     try:
-        with requests.get(url, stream=True, timeout=20, headers=headers) as response:
+        with requests.get(url, stream=True, timeout=20, headers=headers, proxies=proxies) as response:
             response.raise_for_status()
             
             start_time = time.time() 
@@ -70,8 +116,10 @@ def keep_radio_alive(url):
                 if player.poll() is not None:
                     break
 
+    except requests.exceptions.ProxyError:
+        print(f"[{time.strftime('%H:%M:%S')}] Proxy error/dead for {url}: {current_proxy_address}")
     except requests.exceptions.RequestException as e:
-        print(f"Connection error: {e}. Reconnecting immediately...") 
+        print(f"[{time.strftime('%H:%M:%S')}] Connection error: {e}. Reconnecting immediately...") 
         
     finally:
         # Завершаем процесс плеера
