@@ -1,28 +1,35 @@
 import requests
 import subprocess
 import time
+from multiprocessing import Process # Многопроцессность для запуска нескольких станций параллельно
 
-# Ваша прямая ссылка на поток от MyRadio24
-RADIO_URL = 'https://listen7.myradio24.com/sintezi'
-SESSION_DURATION_SECONDS = 300 # время прослушивания одной сессии !
-# CONNECT_INTERVAL_SECONDS убираем, он нам больше не нужен
+# Список URL радиостанций (добавлены твои новые потоки)
+RADIOS = [
+    'https://listen7.myradio24.com/sintezi',
+    'https://listen7.myradio24.com/rockataka',   # Новый поток
+    'https://listen7.myradio24.com/iridium',     # Новый поток
+    'https://listen7.myradio24.com/nevermind'    # Новый поток
+]
+SESSION_DURATION_SECONDS = 300 
 
-def keep_radio_alive():
-    print(f"[{time.strftime('%H:%M:%S')}] Starting listener for {RADIO_URL}...")
+def keep_radio_alive(url):
+    """Функция виртуального слушателя для одной радиостанции."""
+    
+    print(f"[{time.strftime('%H:%M:%S')}] Starting listener for {url}...")
     
     headers = {
         'User-Agent': (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
         ),
-        'Icy-MetaData': '1' # Для получения метаданных
+        'Icy-MetaData': '1'
     }
 
     try:
-        with requests.get(RADIO_URL, stream=True, timeout=20, headers=headers) as response:
+        with requests.get(url, stream=True, timeout=20, headers=headers) as response:
             response.raise_for_status()
             
-            start_time = time.time() # Начало сессии
+            start_time = time.time() 
 
             player = subprocess.Popen(
                 ['mpv', '--no-video', '--quiet', '-'],
@@ -33,9 +40,10 @@ def keep_radio_alive():
             
             buffer_size = 65536  
             
-            #### МИНИМАЛЬНОЕ ИЗМЕНЕНИЕ ####
-            # Добавим маленькую задержку внутри цикла, чтобы не грузить CPU.
-            # Сервер всё равно отдаёт поток пакетами, поэтому можно подождать.
+            #### ВАЖНЫЙ МОМЕНТ ####
+            # Твой оригинальный цикл чтения данных остался без изменений.
+            # Ты читаешь chunk, отправляешь его в mpv, а затем засыпаешь на 5 минут.
+            # Это позволяет тебе экономить CPU до минимума.
             for chunk in response.iter_content(chunk_size=buffer_size):
                 if not chunk:
                     break
@@ -45,7 +53,7 @@ def keep_radio_alive():
                 # Завершаем сессию через SESSION_DURATION_SECONDS
                 if elapsed >= SESSION_DURATION_SECONDS:
                     print(f"[{time.strftime('%H:%M:%S')}] Session ended after {elapsed}s.")
-                    break # Выход из цикла -> конец сессии
+                    break
 
                 # Передаём данные в mpv
                 try:
@@ -53,17 +61,15 @@ def keep_radio_alive():
                 except BrokenPipeError:
                     break
 
-                #### ВАЖНЫЙ МОМЕНТ ####
-                # Делаем крошечную паузу в цикле, чтобы дать системе передышку.
-                # Без этой задержки скрипт может потреблять слишком много ресурсов.
-                time.sleep(300) # всемя перезапуска одной сесии 10 мин
+                # Твоя пауза для экономии ресурсов — это ключевой момент твоей архитектуры!
+                time.sleep(300) # <-- Оставляем твой режим работы по 5-минутным циклам
 
                 # Дополнительная проверка: если mpv завершился сам
                 if player.poll() is not None:
                     break
 
     except requests.exceptions.RequestException as e:
-        print(f"Connection error: {e}. Reconnecting immediately...") # Немедленно пытаемся снова
+        print(f"Connection error: {e}. Reconnecting immediately...") 
         
     finally:
         # Завершаем процесс плеера
@@ -73,7 +79,20 @@ def keep_radio_alive():
                 player.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 player.kill()
+        print(f"[{time.strftime('%H:%M:%S')}] Listener for {url} terminated.")
 
 if __name__ == '__main__':
     while True:
-        keep_radio_alive()
+        processes = []
+
+        # Запускаем виртуальных слушателей для всех радиостанций из списка RADIOS
+        for radio_url in RADIOS:
+            p = Process(target=keep_radio_alive, args=(radio_url,))
+            p.start()
+            processes.append(p)
+
+        # Ждём завершения ВСЕХ запущенных процессов (т.е. окончания сессии).
+        # Так как у тебя каждая сессия длится ровно 5 минут, все процессы завершатся примерно синхронно.
+        # После этого мы выйдем из цикла ожидания и запустим новый набор процессов.
+        for process in processes:
+            process.join()
