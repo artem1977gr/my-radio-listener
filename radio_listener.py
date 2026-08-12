@@ -4,7 +4,7 @@ import time
 
 # Ваша прямая ссылка на поток от MyRadio24
 RADIO_URL = 'https://listen7.myradio24.com/sintezi'
-SESSION_DURATION_SECONDS = 300 # время прослушивания одной сессии !
+SESSION_DURATION_SECONDS = 900 # время прослушивания одной сессии !
 # CONNECT_INTERVAL_SECONDS убираем, он нам больше не нужен
 
 def keep_radio_alive():
