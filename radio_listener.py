@@ -2,9 +2,8 @@ import requests
 import subprocess
 import time
 from multiprocessing import Process # Многопроцессность для запуска нескольких станций параллельно
-import random
 
-# Список URL радиостанций
+# Список URL радиостанций (добавлены твои новые потоки)
 RADIOS = [
     'https://listen7.myradio24.com/sintezi',
     'https://listen7.myradio24.com/sintezi_128',
@@ -14,41 +13,6 @@ RADIOS = [
     'https://listen7.myradio24.com/nevermind'
 ]
 SESSION_DURATION_SECONDS = 300 
-
-# Ссылка на "сырой" файл со списком HTTP-прокси на GitHub
-GITHUB_PROXY_SOURCE = 'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt'
-
-def fetch_proxies_from_github():
-    """
-    Загружаем свежие прокси с GitHub и отбираем только стандартные порты,
-    которые гарантированно должны работать через Railway.
-    """
-    
-    try:
-        response = requests.get(GITHUB_PROXY_SOURCE, timeout=10)
-        response.raise_for_status()
-        
-        proxies = []
-        for line in response.text.splitlines():
-            # Очищаем строку от мусора
-            line = line.strip().replace('http://', '').replace('https://', '')
-            
-            # Проверяем формат: должно быть ровно одно двоеточие (ip:port)
-            if ':' not in line or line.count(':') != 1:
-                continue
-                
-            ip, port = line.split(':')
-            # Оставляем только безопасные порты! Railway часто блокирует другие.
-            # Если вы используете платные прокси — можно убрать эту проверку.
-            if port in ['80', '443']:
-                proxies.append(f'http://{line}')
-                    
-    except Exception as e:
-        print(f"[{time.strftime('%H:%M:%S')}] Ошибка при загрузке списка: {e}")
-        return []
-    
-    return proxies
-
 
 def keep_radio_alive(url):
     """Функция виртуального слушателя для одной радиостанции."""
@@ -63,13 +27,8 @@ def keep_radio_alive(url):
         'Icy-MetaData': '1'
     }
 
-    #### ВАЖНЫЙ МОМЕНТ ####
-    # Прокси выбирается ВНЕ функции, поэтому здесь мы просто используем переменную current_proxy_address
-    # Она будет либо валидным адресом, либо None (если прокси не нашлось).
-    proxies = {"http": current_proxy_address, "https": current_proxy_address} if current_proxy_address else None
-
     try:
-        with requests.get(url, stream=True, timeout=20, headers=headers, proxies=proxies) as response:
+        with requests.get(url, stream=True, timeout=20, headers=headers) as response:
             response.raise_for_status()
             
             start_time = time.time() 
@@ -83,10 +42,10 @@ def keep_radio_alive(url):
             
             buffer_size = 65536  
             
-            #### ВАШ ИСХОДНЫЙ ЦИКЛ РАБОТЫ СОХРАНЁН ###
-            # Вы читаете первый чанк данных, отправляете его в mpv и засыпаете на 5 минут.
-            # За это время плеер успевает воспроизвести поток, а соединение остаётся открытым.
-            # Этот подход работает идеально без прокси, но требует специальных условий для них.
+            #### ВАЖНЫЙ МОМЕНТ ####
+            # Твой оригинальный цикл чтения данных остался без изменений.
+            # Ты читаешь chunk, отправляешь его в mpv, а затем засыпаешь на 5 минут.
+            # Это позволяет тебе экономить CPU до минимума.
             for chunk in response.iter_content(chunk_size=buffer_size):
                 if not chunk:
                     break
@@ -104,17 +63,15 @@ def keep_radio_alive(url):
                 except BrokenPipeError:
                     break
 
-                # Ваша пауза для таймера окончания сессии
-                time.sleep(300) # <-- Оставлено без изменений
+                # Твоя пауза для экономии ресурсов — это ключевой момент твоей архитектуры!
+                time.sleep(300) # <-- Оставляем твой режим работы по 5-минутным циклам
 
                 # Дополнительная проверка: если mpv завершился сам
                 if player.poll() is not None:
                     break
 
-    except requests.exceptions.ProxyError:
-        print(f"[{time.strftime('%H:%M:%S')}] Proxy error/dead: {current_proxy_address}")
     except requests.exceptions.RequestException as e:
-        print(f"[{time.strftime('%H:%M:%S')}] Connection error: {e}. Reconnecting immediately...") 
+        print(f"Connection error: {e}. Reconnecting immediately...") 
         
     finally:
         # Завершаем процесс плеера
@@ -128,25 +85,16 @@ def keep_radio_alive(url):
 
 if __name__ == '__main__':
     while True:
-        # ⚠️ Ключевое изменение: выбор прокси вынесен сюда!
-        # Скачиваем НОВЫЙ список ПЕРЕД каждым циклом вещания
-        PROXY_POOL = fetch_proxies_from_github()
-        
-        # Выбираем один случайный прокси для ВСЕГО текущего цикла.
-        # Если список пуст — будем слушать напрямую.
-        current_proxy_address = random.choice(PROXY_POOL) if PROXY_POOL else None
-
         processes = []
 
         # Запускаем виртуальных слушателей для всех радиостанций из списка RADIOS
-        # Все процессы будут использовать одну и ту же прокси-сессию.
         for radio_url in RADIOS:
             p = Process(target=keep_radio_alive, args=(radio_url,))
             p.start()
             processes.append(p)
 
         # Ждём завершения ВСЕХ запущенных процессов (т.е. окончания сессии).
-        # Так как у вас каждая сессия длится ровно 5 минут, все процессы завершатся примерно синхронно.
+        # Так как у тебя каждая сессия длится ровно 5 минут, все процессы завершатся примерно синхронно.
         # После этого мы выйдем из цикла ожидания и запустим новый набор процессов.
         for process in processes:
             process.join()
