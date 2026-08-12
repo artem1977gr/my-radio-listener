@@ -4,7 +4,7 @@ import time
 
 # Ваша прямая ссылка на поток от MyRadio24
 RADIO_URL = 'https://listen7.myradio24.com/sintezi'
-SESSION_DURATION_SECONDS = 200 # ~15 минут. Оставляем без изменений!
+SESSION_DURATION_SECONDS = 600 # время прослушивания одной сессии !
 # CONNECT_INTERVAL_SECONDS убираем, он нам больше не нужен
 
 def keep_radio_alive():
@@ -56,7 +56,7 @@ def keep_radio_alive():
                 #### ВАЖНЫЙ МОМЕНТ ####
                 # Делаем крошечную паузу в цикле, чтобы дать системе передышку.
                 # Без этой задержки скрипт может потреблять слишком много ресурсов.
-                time.sleep(600) # Пауза в 100 миллисекунд
+                time.sleep(600) # всемя перезапуска одной сесии 10 мин
 
                 # Дополнительная проверка: если mpv завершился сам
                 if player.poll() is not None:
