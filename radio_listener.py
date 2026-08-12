@@ -6,9 +6,11 @@ from multiprocessing import Process # Многопроцессность для 
 # Список URL радиостанций (добавлены твои новые потоки)
 RADIOS = [
     'https://listen7.myradio24.com/sintezi',
-    'https://listen7.myradio24.com/rockataka',   # Новый поток
-    'https://listen7.myradio24.com/iridium',     # Новый поток
-    'https://listen7.myradio24.com/nevermind'    # Новый поток
+    'https://listen7.myradio24.com/sintezi_128',
+    'https://listen7.myradio24.com/rockataka',
+    'https://listen7.myradio24.com/rockataka_128',
+    'https://listen7.myradio24.com/iridium',
+    'https://listen7.myradio24.com/nevermind'
 ]
 SESSION_DURATION_SECONDS = 300 
 
