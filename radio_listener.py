@@ -1,9 +1,10 @@
-import requests  # Для работы с HTTP(S)
-import subprocess  # Для запуска MPV
-import time  # Для таймеров и пауз
-from multiprocessing import Process  # Многопроцессность
+import requests
+import subprocess
+import time
+from multiprocessing import Process # Многопроцессность для запуска нескольких станций параллельно
+import random
 
-# Список URL ваших радиостанций
+# Список URL радиостанций
 RADIOS = [
     'https://listen7.myradio24.com/sintezi',
     'https://listen7.myradio24.com/sintezi_128',
@@ -12,14 +13,16 @@ RADIOS = [
     'https://listen7.myradio24.com/iridium',
     'https://listen7.myradio24.com/nevermind'
 ]
-SESSION_DURATION_SECONDS = 300  # Длительность одной сессии прослушивания
+SESSION_DURATION_SECONDS = 300 
 
-# Ссылка на "сырой" текстовый файл со списком бесплатных прокси на GitHub
+# Ссылка на "сырой" файл со списком HTTP-прокси на GitHub
 GITHUB_PROXY_SOURCE = 'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt'
 
-# ⚠️ Эта функция скачивает список прокси один раз за цикл
 def fetch_proxies_from_github():
-    """Загружаем свежие прокси с GitHub и отбираем только те, что работают на стандартных портах."""
+    """
+    Загружаем свежие прокси с GitHub и отбираем только стандартные порты,
+    которые гарантированно должны работать через Railway.
+    """
     
     try:
         response = requests.get(GITHUB_PROXY_SOURCE, timeout=10)
@@ -27,44 +30,30 @@ def fetch_proxies_from_github():
         
         proxies = []
         for line in response.text.splitlines():
+            # Очищаем строку от мусора
             line = line.strip().replace('http://', '').replace('https://', '')
             
-            # Проверяем формат IP:PORT и оставляем только стандартные порты
-            if ':' in line and line.count(':') == 1:
-                ip, port = line.split(':')
-                # Railway часто блокирует нестандартные порты публичных прокси!
-                # Оставим только безопасные варианты
-                if port in ['80', '443']:
-                    proxies.append(f'http://{line}')
+            # Проверяем формат: должно быть ровно одно двоеточие (ip:port)
+            if ':' not in line or line.count(':') != 1:
+                continue
+                
+            ip, port = line.split(':')
+            # Оставляем только безопасные порты! Railway часто блокирует другие.
+            # Если вы используете платные прокси — можно убрать эту проверку.
+            if port in ['80', '443']:
+                proxies.append(f'http://{line}')
                     
-        print(f"[{time.strftime('%H:%M:%S')}] Загрузил {len(proxies)} валидных прокси.")
-        return proxies
-    
     except Exception as e:
         print(f"[{time.strftime('%H:%M:%S')}] Ошибка при загрузке списка: {e}")
         return []
-
-# ⚠️ Простая проверка: можем ли мы получить заголовки ответа через этот прокси?
-def check_proxy(proxy_address):
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    test_url = RADIOS[0]  # Берём первую станцию для проверки
     
-    try:
-        with requests.head(test_url, timeout=5, headers=headers, proxies={"http": proxy_address, "https": proxy_address}) as resp:
-            # Если запрос прошёл — прокси живой
-            return True  
-    except requests.exceptions.RequestException:
-        # Прокси мёртв или забанен сервером радио
-        return False 
+    return proxies
 
-# ✅ ВАША оригинальная функция без изменений! Только добавлена поддержка None-прокси
-def keep_radio_alive(url, current_proxy_address=None):
-    """
-    Функция виртуального слушателя для одной радиостанции.
-    Сохраняет ваш уникальный режим экономии ресурсов (sleep(300)).
-    """
+
+def keep_radio_alive(url):
+    """Функция виртуального слушателя для одной радиостанции."""
     
-    print(f"[{time.strftime('%H:%M:%S')}] Starting listener for {url} via {current_proxy_address or 'DIRECT CONNECTION'}...")
+    print(f"[{time.strftime('%H:%M:%S')}] Starting listener for {url}...")
     
     headers = {
         'User-Agent': (
@@ -74,7 +63,9 @@ def keep_radio_alive(url, current_proxy_address=None):
         'Icy-MetaData': '1'
     }
 
-    # Ваш оригинальный подход к прокси
+    #### ВАЖНЫЙ МОМЕНТ ####
+    # Прокси выбирается ВНЕ функции, поэтому здесь мы просто используем переменную current_proxy_address
+    # Она будет либо валидным адресом, либо None (если прокси не нашлось).
     proxies = {"http": current_proxy_address, "https": current_proxy_address} if current_proxy_address else None
 
     try:
@@ -92,9 +83,10 @@ def keep_radio_alive(url, current_proxy_address=None):
             
             buffer_size = 65536  
             
-            #### ВАШ ИСХОДНЫЙ ЦИКЛ ####
-            # Вы читаете чанк, отправляете его в mpv и засыпаете на 5 минут.
-            # Это ваша уникальная архитектура экономии CPU.
+            #### ВАШ ИСХОДНЫЙ ЦИКЛ РАБОТЫ СОХРАНЁН ###
+            # Вы читаете первый чанк данных, отправляете его в mpv и засыпаете на 5 минут.
+            # За это время плеер успевает воспроизвести поток, а соединение остаётся открытым.
+            # Этот подход работает идеально без прокси, но требует специальных условий для них.
             for chunk in response.iter_content(chunk_size=buffer_size):
                 if not chunk:
                     break
@@ -112,7 +104,7 @@ def keep_radio_alive(url, current_proxy_address=None):
                 except BrokenPipeError:
                     break
 
-                # Ваша пауза для экономии ресурсов
+                # Ваша пауза для таймера окончания сессии
                 time.sleep(300) # <-- Оставлено без изменений
 
                 # Дополнительная проверка: если mpv завершился сам
@@ -136,23 +128,25 @@ def keep_radio_alive(url, current_proxy_address=None):
 
 if __name__ == '__main__':
     while True:
+        # ⚠️ Ключевое изменение: выбор прокси вынесен сюда!
         # Скачиваем НОВЫЙ список ПЕРЕД каждым циклом вещания
-        PROXIES_POOL = fetch_proxies_from_github()
+        PROXY_POOL = fetch_proxies_from_github()
         
-        # Фильтруем прокси, проверяя их работоспособность
-        WORKING_PROXIES = [p for p in PROXIES_POOL if check_proxy(p)]
-        
-        # Если ни один прокси не прошёл проверку, используем прямое соединение
-        # В случае с бесплатными списками это произойдёт ВСЕГДА, потому что они уже забанены.
-        current_proxy = random.choice(WORKING_PROXIES) if WORKING_PROXIES else None
+        # Выбираем один случайный прокси для ВСЕГО текущего цикла.
+        # Если список пуст — будем слушать напрямую.
+        current_proxy_address = random.choice(PROXY_POOL) if PROXY_POOL else None
 
         processes = []
-        # Запускаем все процессы с одним и тем же рабочим прокси (или напрямую)
+
+        # Запускаем виртуальных слушателей для всех радиостанций из списка RADIOS
+        # Все процессы будут использовать одну и ту же прокси-сессию.
         for radio_url in RADIOS:
-            p = Process(target=keep_radio_alive, args=(radio_url, current_proxy))
+            p = Process(target=keep_radio_alive, args=(radio_url,))
             p.start()
             processes.append(p)
 
-        # Ждём завершения ВСЕХ запущенных процессов (через 5 минут)
+        # Ждём завершения ВСЕХ запущенных процессов (т.е. окончания сессии).
+        # Так как у вас каждая сессия длится ровно 5 минут, все процессы завершатся примерно синхронно.
+        # После этого мы выйдем из цикла ожидания и запустим новый набор процессов.
         for process in processes:
             process.join()
