@@ -1,4 +1,4 @@
-import socket
+import requests
 import time
 from multiprocessing import Process # Многопроцессность для запуска нескольких станций параллельно
 import random
@@ -18,40 +18,47 @@ SESSION_DURATION_MIN = 300   # Минимум 5 минут
 SESSION_DURATION_MAX = 400   # Максимум ~6 мин 40 сек
 
 def keep_radio_alive(url):
-    """Функция виртуального слушателя через низкоуровневый сокет."""
+    """Функция виртуального слушателя."""
     
-    headers = (
-        f"GET / HTTP/1.1\r\n"
-        f"Host: listen7.myradio24.com\r\n"
-        f"Icy-MetaData: 1\r\n"
-        f"User-Agent: Mozilla/5.0 Chrome/129 Safari/537.36\r\n"
-        f"Referer: {REFERER_URL}\r\n"
-        "\r\n"
-    )
+    headers = {
+        'User-Agent': (
+            "Mozilla/5.0 Chrome/129 Safari/537.36"
+        ),
+        'Referer': REFERER_URL,
+        'Icy-MetaData': '1',
+        #### ВАЖНОЕ ИЗМЕНЕНИЕ ####
+        # Это ключ к решению проблемы исчезновения слушателей.
+        # Мы говорим серверу держать соединение открытым.
+        'Connection': 'Keep-Alive'
+    }
 
     while True:  
         session_duration = random.randint(SESSION_DURATION_MIN, SESSION_DURATION_MAX)
         
         try:
-            with socket.create_connection(("listen7.myradio24.com", 80)) as sock:
-                # Отправляем запрос вручную
-                sock.sendall(headers.encode())
+            with requests.get(
+                url, stream=True, timeout=20, headers=headers,
+                #### ЕЩЁ ОДНА ОПТИМИЗАЦИЯ ###
+                # По умолчанию requests буферизует данные во внутреннем объекте Response.
+                # Чтобы снизить нагрузку на память, используем raw-соединение.
+                allow_redirects=False
+            ) as response:
+                response.raw.decode_content = False # Отключаем декодирование
                 
                 start_time = time.time()
 
-                #### ОПТИМИЗАЦИЯ ПОД ОБЛАЧНЫЕ СЕРВЕРЫ ####
-                # Читаем всего 1 байт каждые 1–2 секунды.
-                # Это поддерживает соединение активным без буферизации данных.
+                #### ЧТЕНИЕ БЕЗ НАКОПЛЕНИЯ ДАННЫХ В ПАМЯТИ ####
+                # Читаем по одному байту напрямую из сырого потока.
+                # Это поддерживает соединение активным, но не нагружает память.
                 while int(time.time() - start_time) < session_duration:
-                    # Пытаемся прочитать один байт
-                    data = sock.recv(1)
+                    data = response.raw.read(1)
                     
-                    # Если пришли метаданные (обычно начинаются с ICY), просто пропускаем их
+                    # Если пришли метаданные или конец файла
                     if not data or data.startswith(b'ICY'):
                         continue
 
                     # Пауза между чтением байтов для экономии CPU
-                    time.sleep(random.uniform(1, 2))
+                    time.sleep(random.uniform(0.5, 1))
 
         except Exception as e:
             print(f"[{time.strftime('%H:%M:%S')}] Connection error for {url}: {e}. Reconnecting...")
@@ -63,7 +70,6 @@ if __name__ == '__main__':
     processes = []
     
     # Запускаем ВСЕХ слушателей ОДНОВРЕМЕННО через процессы
-    # Каждый процесс будет жить своей жизнью благодаря циклу while True внутри функции
     for radio_url in RADIOS:
         p = Process(target=keep_radio_alive, args=(radio_url,))
         p.start()
