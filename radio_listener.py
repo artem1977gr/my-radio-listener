@@ -1,77 +1,70 @@
-import requests
-import time
-from multiprocessing import Process
+import asyncio
+import aiohttp
 import random
+import time
 
 
 # Глобальные настройки
-SESSION_DURATION_SECONDS = 345  # ~5 минут 45 секунд
-
-# ⚠️ СЛЕДУЮЩИЙ БЛОК НЕ ИЗМЕНЯЙ!
-# Мы создаем "вложенные" списки для каждого количества слушателей,
-# чтобы потом их развернуть и запустить каждый элемент отдельно.
 RADIOS = [
+    # Твой оригинальный список с нужными пропорциями слушателей
     *(['https://listen7.myradio24.com/sintezi'] * 4),
     *(['https://listen7.myradio24.com/sintezi_128'] * 2),
-    *(['https://listen7.myradio24.com/rockataka'] * 4),
+    *(['https://listen7.myradio24.com/rockataka'] * 4),  
     *(['https://listen7.myradio24.com/rockataka_128'] * 2),
     *(['https://listen7.myradio24.com/iridium'] * 2),
-    *(['https://listen7.myradio24.com/nevermind'] * 2),
+    *(['https://listen7.myradio24.com/nevermind'] * 2)
 ]
-# Теперь RADIOS — это плоский список из 16 отдельных строк-URL.
 
-def keep_radio_alive(url):
-    print(f"[{time.strftime('%H:%M:%S')}] Starting listener for {url}...")
+REFERER_URL = "https://radio.art-test-1.store"
+SESSION_DURATION_MIN = 300  # Минимум 5 минут
+SESSION_DURATION_MAX = 400  # Максимум ~6 минут 40 сек
+
+async def keep_radio_alive(session, url):
+    """Асинхронно поддерживает подключение к радиостанции."""
     
     headers = {
-        'User-Agent': "Mozilla/5.0 Chrome/128",
-        'Referer': 'https://radio.art-test-1.store',
-        'Icy-MetaData': '1'
+        'User-Agent': (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/129 Safari/537.36"
+        ),
+        'Referer': REFERER_URL,
+        'Icy-MetaData': '1'  # Для получения названий треков из метаданных потока
     }
 
-    try:
-        with requests.get(url, stream=True, timeout=20, headers=headers) as response:
-            response.raise_for_status()
-            
-            start_time = time.time() 
-
-            #### ВАЖНЫЙ МОМЕНТ ####
-            # Поддерживаем соединение активным ровно SESSION_DURATION_SECONDS.
-            buffer_size = 65536  
-            
-            for _ in response.iter_content(chunk_size=buffer_size): # Используем _, т.к. chunk нам больше не нужен
-                if int(time.time() - start_time) >= SESSION_DURATION_SECONDS:
-                    break
-
-                # Пауза на всю длительность сессии (~5:45).
-                # Благодаря этому CPU почти не нагружается.
-                time.sleep(SESSION_DURATION_SECONDS)
-
-    except requests.exceptions.RequestException as e:
-        print(f"Connection error: {e}. Reconnecting immediately...") 
+    while True:  # Бесконечный цикл для перезапуска после окончания сессии
+        session_duration = random.randint(SESSION_DURATION_MIN, SESSION_DURATION_MAX)
         
-    finally:
-        print(f"[{time.strftime('%H:%M:%S')}] Listener for {url} terminated.")
+        try:
+            async with session.get(url, timeout=20, headers=headers) as response:
+                if response.status != 200:
+                    print(f"[{time.strftime('%H:%M:%S')}] Error {response.status} for {url}")
+                    await asyncio.sleep(10)  # Подождать перед повторной попыткой
+                    continue
 
+                start_time = time.time()
+                
+                # Поддерживаем соединение активным ровно заданную сессию
+                buffer_size = 65536  
+                async for chunk in response.content.iter_chunked(buffer_size): 
+                    elapsed = int(time.time() - start_time)
+                    
+                    # Пауза на оставшееся время сессии (~5-6 мин). Экономим ресурсы!
+                    await asyncio.sleep(max(0, session_duration - elapsed))
 
-if __name__ == '__main__':
-    while True:  # Главный цикл работы скрипта
-        processes = []
+                    # Если мы вышли за пределы времени, прерываем чтение данных
+                    if elapsed >= session_duration:
+                        break
+
+        except Exception as e:
+            print(f"[{time.strftime('%H:%M:%S')}] Connection error: {e}. Reconnecting immediately...")
         
-        # ❗ ОЧЕНЬ ВАЖНО! ❗
-        # Здесь мы перебираем КАЖДЫЙ ЭЛЕМЕНТ списка RADIOS.
-        # Раньше у тебя был подсписок [url] * N, который передавался целиком.
-        # Сейчас url — это одна строка.
-        for i, radio_url in enumerate(RADIOS):
-            p = Process(target=keep_radio_alive, args=(radio_url,))
-            
-            delay = random.randint(15, 30)  # Случайная задержка при старте
-            print(f"[{time.strftime('%H:%M:%S')}] Запуск {i+1}/{len(RADIOS)} через ~{delay} сек.: {radio_url}")
-            time.sleep(delay)
-            p.start()
-            processes.append(p)
+        finally:
+            print(f"[{time.strftime('%H:%M:%S')}] Listener for {url} terminated after {session_duration}s.")
 
-        # Ждем завершения ВСЕХ запущенных процессов.
-        # После этого скрипт начнет новый круг запуска.
-        for process in processes:
-            process.join()
+async def main():
+    async with aiohttp.ClientSession() as session:
+        tasks = [asyncio.create_task(keep_radio_alive(session, radio_url)) for radio_url in RADIOS]
+        # Все слушатели стартуют ОДНОВРЕМЕННО в фоне
+        await asyncio.gather(*tasks)
+
+if __name__ == "__main__":
+    asyncio.run(main())
