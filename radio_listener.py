@@ -15,13 +15,12 @@ RADIOS = [
     *(['https://listen7.myradio24.com/nevermind'] * 2)
 ]
 REFERER_URL = "https://radio.art-test-1.store"
-SESSION_DURATION_MIN = 600   # Минимум 10 минут
-SESSION_DURATION_MAX = 1200  # Максимум ~20 мин
+SESSION_DURATION_MIN = 300   # Минимум 5 минут
+SESSION_DURATION_MAX = 900   # Максимум ~15 мин (можно увеличить!)
+READ_TIMEOUT_SEC = 5        # Ключевое изменение!
 
 
 def keep_radio_alive(url):
-    """Функция виртуального слушателя."""
-    
     parsed_url = urlparse(url)
     host = parsed_url.netloc.split(':')[0] # Получаем только домен без порта
     path = parsed_url.path  
@@ -45,42 +44,44 @@ def keep_radio_alive(url):
         
         try:
             with socket.create_connection((host, 80)) as sock:
+                # ⚡️ ВАЖНОЕ ИЗМЕНЕНИЕ: устанавливаем небольшой таймаут на чтение
+                sock.settimeout(READ_TIMEOUT_SEC)  # Чтение каждые 5 секунд
+
                 sock.sendall(headers.encode())
                 
                 # Сначала получаем ответ сервера и парсим его заголовки
                 response_headers = b""
                 while True:
                     chunk = sock.recv(4096) # Читаем порциями по 4 КБ
+                    if not chunk:
+                        break
                     response_headers += chunk
                     
                     # Ждём появления пустой строки, которая завершает заголовки ответа
                     if b"\r\n\r\n" in response_headers:
                         break
 
-                # Парсинг заголовка icymetaint
-                meta_int_str = [line for line in response_headers.decode().split("\r\n") 
-                                if line.lower().startswith("icy-metaint")]
-                # Если сервер не прислал этот заголовок, ставим стандартный интервал ~25 KB
-                meta_interval = int(meta_int_str[0].split(":")[1]) if meta_int_str else 25600
-
-                print(f"[{time.strftime('%H:%M:%S')}] Connected to {url} ({meta_interval})") # <--- Добавил вывод названия
-
                 start_time = time.time()
 
                 #### НАДЕЖНЫЙ СПОСОБ ПОДДЕРЖАНИЯ СОЕДИНЕНИЯ ####
-                # Мы ждём прихода блоков метаданных (~раз в минуту).
-                # Это гарантирует активность соединения без лишнего потребления ресурсов.
+                # Мы просто пытаемся читать данные небольшими кусками каждые READ_TIMEOUT_SEC секунд.
+                # Если данных нет — сокет вернёт исключение TimeoutError, которое мы игнорируем.
+                # За счёт этого сервер видит стабильное потребление трафика,
+                # а наш скрипт практически не нагружает CPU и память.
                 while int(time.time() - start_time) < session_duration:
-                    # Читаем ровно столько, сколько нужно для получения одного блока метаданных + небольшой запас
-                    sock.recv(meta_interval + 256)
-                    # Пауза ~1 сек для экономии CPU
-                    time.sleep(random.uniform(0.8, 1.2))
+                    try:
+                        # Пытаемся прочитать данные (не важно сколько)
+                        sock.recv(1024)
+                    except socket.timeout:
+                        pass  # Игнорируем отсутствие данных
+                    except Exception as e:
+                        print(f"[{time.strftime('%H:%M:%S')}] Read error for {url}: {e}")
+                        break
 
         except Exception as e:
             print(f"[{time.strftime('%H:%M:%S')}] Connection error for {url}: {e}. Reconnecting...")
         
         finally:
-            #### ИСПРАВИЛА ЭТУ СТРОКУ ###
             print(f"[{time.strftime('%H:%M:%S')}] Session ended after {session_duration}s for {url}.")
 
 
