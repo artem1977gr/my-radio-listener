@@ -7,6 +7,7 @@ from multiprocessing import Process # Многопроцессность для 
 RADIOS = [
     'https://listen7.myradio24.com/sintezi',
     'https://listen7.myradio24.com/sintezi_128',
+    'https://listen7.myradio24.com/sintezi',
     'https://listen7.myradio24.com/rockataka',
     'https://listen7.myradio24.com/rockataka_128',
     'https://listen7.myradio24.com/iridium',
