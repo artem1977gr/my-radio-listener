@@ -7,12 +7,14 @@ from multiprocessing import Process # Многопроцессность для 
 RADIOS = [
     'https://listen7.myradio24.com/sintezi',
     'https://listen7.myradio24.com/sintezi',
+    'https://listen7.myradio24.com/sintezi',
+    'https://listen7.myradio24.com/sintezi_128',
     'https://listen7.myradio24.com/rockataka',
     'https://listen7.myradio24.com/rockataka_128',
     'https://listen7.myradio24.com/iridium',
     'https://listen7.myradio24.com/nevermind'
 ]
-SESSION_DURATION_SECONDS = 300 
+SESSION_DURATION_SECONDS = 260 
 
 def keep_radio_alive(url):
     """Функция виртуального слушателя для одной радиостанции."""
@@ -64,7 +66,7 @@ def keep_radio_alive(url):
                     break
 
                 # Твоя пауза для экономии ресурсов — это ключевой момент твоей архитектуры!
-                time.sleep(300) # <-- Оставляем твой режим работы по 5-минутным циклам
+                time.sleep(260) # <-- ПЕРЕЗАГРУЗКА !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
                 # Дополнительная проверка: если mpv завершился сам
                 if player.poll() is not None:
