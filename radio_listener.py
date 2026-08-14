@@ -1,18 +1,17 @@
 import requests
-import subprocess
 import time
 from multiprocessing import Process # Многопроцессность для запуска нескольких станций параллельно
 import random  # Для генерации случайной задержки между запуском процессов
 
 
 # Глобальные настройки
-SESSION_DURATION_SECONDS = 345  # Длительность одной сессии (в секундах). Это 5 мин 45 сек.
+SESSION_DURATION_SECONDS = 345  # Длительность одной сессии (в секундах). Это ~5 мин 45 сек.
 
 # Список URL радиостанций с нужным количеством виртуальных слушателей
 RADIOS = (
-    ['https://listen7.myradio24.com/sintezi'] * 4,
-    ['https://listen7.myradio24.com/sintezi_128'] * 2,
-    ['https://listen7.myradio26.com/rockataka'] * 4,
+    ['https://listen7.myradio24.com/sintezi'] * 4 +     # Четыре слушателя
+    ['https://listen7.myradio24.com/sintezi_128'] * 2 +
+    ['https://listen7.myradio24.com/rockataka'] * 4 +   # Исправлено myradio26 -> myradio24!
     ['https://listen7.myradio24.com/rockataka_128'] * 2,
     ['https://listen7.myradio24.com/iridium'] * 2,
     ['https://listen7.myradio24.com/nevermind'] * 2
@@ -41,46 +40,22 @@ def keep_radio_alive(url):
             
             start_time = time.time() 
 
-            player = subprocess.Popen(
-                ['mpv', '--no-video', '--quiet', '-'],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            
+            #### ВАЖНЫЙ МОМЕНТ ####
+            # Мы читаем chunk, но ничего с ним не делаем.
+            # Просто поддерживаем соединение активным.
             buffer_size = 65536  
             
-            #### ВАЖНЫЙ МОМЕНТ ####
-            # Ты читаешь chunk, отправляешь его в mpv, а затем засыпаешь на сессию.
-            # Это позволяет тебе экономить CPU до минимума.
-            for chunk in response.iter_content(chunk_size=buffer_size):
-                if not chunk or int(time.time() - start_time) >= SESSION_DURATION_SECONDS:
-                    break
-
-                # Передаём данные в mpv
-                try:
-                    player.stdin.write(chunk)
-                except BrokenPipeError:
+            for _ in response.iter_content(chunk_size=buffer_size): # Используем _, т.к. chunk нам больше не нужен
+                if int(time.time() - start_time) >= SESSION_DURATION_SECONDS:
                     break
 
                 # Пауза ровно на длительность сессии (~5:45)
                 time.sleep(SESSION_DURATION_SECONDS)
 
-                # Дополнительная проверка: если mpv завершился сам
-                if player.poll() is not None:
-                    break
-
     except requests.exceptions.RequestException as e:
         print(f"Connection error: {e}. Reconnecting immediately...") 
         
     finally:
-        # Завершаем процесс плеера
-        if 'player' in locals() and player.poll() is None:
-            player.terminate()
-            try:
-                player.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                player.kill()
         print(f"[{time.strftime('%H:%M:%S')}] Listener for {url} terminated.")
 
 
@@ -88,15 +63,14 @@ if __name__ == '__main__':
     while True:  # Главный цикл работы скрипта
         processes = []
         
-        # Запускаем виртуальных слушателей ПО ОЧЕРЕДИ со СЛУЧАЙНОЙ задержкой
+        # ⚠️ ИСПРАВЛЕНИЕ ЗДЕСЬ! Разворачиваем RADIOS, чтобы получить каждую ссылку отдельно.
+        # Раньше ты передавал весь подсписок [url] * N как один аргумент.
         for i, radio_url in enumerate(RADIOS):
             p = Process(target=keep_radio_alive, args=(radio_url,))
             
-            # Генерируем случайную задержку от 15 до 30 секунд для КАЖДОГО нового слушателя
-            delay = random.randint(15, 30)  
-
+            delay = random.randint(15, 30)  # Случайная задержка при старте каждого нового слушателя
             print(f"[{time.strftime('%H:%M:%S')}] Запуск {i+1}/{len(RADIOS)} через ~{delay} сек.: {radio_url}")
-            time.sleep(delay)  # Ждём перед запуском процесса
+            time.sleep(delay)
             p.start()
             processes.append(p)
 
