@@ -15,8 +15,8 @@ RADIOS = [
     *(['https://listen7.myradio24.com/nevermind'] * 2)
 ]
 REFERER_URL = "https://radio.art-test-1.store"
-SESSION_DURATION_MIN = 100
-SESSION_DURATION_MAX = 900
+SESSION_DURATION_MIN = 600
+SESSION_DURATION_MAX = 1200
 
 def keep_radio_alive(url):
     parsed_url = urlparse(url)
