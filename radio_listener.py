@@ -8,14 +8,14 @@ import random
 RADIOS = [
     *(['https://listen7.myradio24.com/sintezi'] * 4),
     *(['https://listen7.myradio24.com/sintezi_128'] * 2),
-    *(['https://listen7.myradio26.com/rockataka'] * 4), # Оставил myradio26!
+    *(['https://listen7.myradio24.com/rockataka'] * 4), # Исправлено: теперь myradio24!
     *(['https://listen7.myradio24.com/rockataka_128'] * 2),
     *(['https://listen7.myradio24.com/iridium'] * 2),
     *(['https://listen7.myradio24.com/nevermind'] * 2)
 ]
 REFERER_URL = "https://radio.art-test-1.store"
 SESSION_DURATION_MIN = 300   # Минимум 5 минут
-SESSION_DURATION_MAX = 400   # Максимум ~6 мин 40 сек
+SESSION_DURATION_MAX = 900   # Максимум ~6 мин 40 сек
 
 def keep_radio_alive(url):
     """Функция виртуального слушателя для одной радиостанции."""
@@ -30,7 +30,7 @@ def keep_radio_alive(url):
 
     while True:  # Бесконечный цикл жизни одного слушателя
         
-        session_duration = random.randint(SESSION_DURATION_MIN, SESSION_DURATION_MAX) # Индивидуальный таймер
+        session_duration = random.randint(SESSION_DURATION_MIN, SESSION_DURATION_MAX) 
         
         try:
             with requests.get(url, stream=True, timeout=20, headers=headers) as response:
@@ -38,17 +38,11 @@ def keep_radio_alive(url):
                 
                 start_time = time.time() 
 
-                #### ВАЖНЫЙ МОМЕНТ ####
-                # Поддерживаем соединение активным ровно заданную сессию
-                buffer_size = 65536  
-                
-                for _ in response.iter_content(chunk_size=buffer_size): # Используем _, т.к. chunk нам больше не нужен
-                    elapsed = int(time.time() - start_time)
-                    
-                    # Пауза на оставшееся время текущей сессии (~5-6 мин). Экономит ресурсы!
-                    time.sleep(max(0, session_duration - elapsed))
-
-                    if elapsed >= session_duration:
+                #### ОПТИМИЗАЦИЯ ####
+                # Читаем очень маленькие порции (по 1 байту).
+                # Это поддерживает соединение активным, но не нагружает память.
+                for _ in response.iter_content(chunk_size=1):  
+                    if int(time.time() - start_time) >= session_duration:
                         break
 
         except Exception as e:
