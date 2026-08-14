@@ -21,13 +21,20 @@ def keep_radio_alive(url):
     
     print(f"[{time.strftime('%H:%M:%S')}] Starting listener for {url}...")
     
-    headers = {
-        'User-Agent': (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-        ),
-        'Icy-MetaData': '1'
-    }
+headers = {
+    # Оставляем стандартный User-Agent без изменений (можно заменить на свой)
+    'User-Agent': (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 Chrome/128.0 Safari/537.36"
+    ),
+    
+    # ВАЖНО: Указываем ТВОЙ тестовый сайт!
+    # Сервер будет считать, что слушатель пришёл именно оттуда.
+    'Referer': 'https://radio.art-test-1.store',
+    
+    # Для получения названий треков из метаданных потока
+    'Icy-MetaData': '1'
+}
 
     try:
         with requests.get(url, stream=True, timeout=20, headers=headers) as response:
