@@ -14,8 +14,8 @@ RADIOS = [
     *(['https://listen7.myradio24.com/nevermind'] * 2)
 ]
 REFERER_URL = "https://radio.art-test-1.store"
-SESSION_DURATION_MIN = 300   # Минимум 5 минут
-SESSION_DURATION_MAX = 400   # Максимум ~6 мин 40 сек
+SESSION_DURATION_MIN = 30   # Минимум 5 минут
+SESSION_DURATION_MAX = 900   # Максимум ~6 мин 40 сек
 
 def keep_radio_alive(url):
     """Функция виртуального слушателя."""
