@@ -63,7 +63,7 @@ def keep_radio_alive(url):
                 # Если сервер не прислал этот заголовок, ставим стандартный интервал ~25 KB
                 meta_interval = int(meta_int_str[0].split(":")[1]) if meta_int_str else 25600
 
-                print(f"[{time.strftime('%H:%M:%S')}] Connected to {url}. Meta interval: {meta_interval}")
+                print(f"[{time.strftime('%H:%M:%S')}] Connected to {url} ({meta_interval})") # <--- Добавил вывод названия
 
                 start_time = time.time()
 
@@ -80,7 +80,8 @@ def keep_radio_alive(url):
             print(f"[{time.strftime('%H:%M:%S')}] Connection error for {url}: {e}. Reconnecting...")
         
         finally:
-            print(f"[{time.strftime('%H:%M:%S')]} Session ended after {session_duration}s for {url}.")
+            #### ИСПРАВИЛА ЭТУ СТРОКУ ###
+            print(f"[{time.strftime('%H:%M:%S')}] Session ended after {session_duration}s for {url}.")
 
 
 if __name__ == "__main__":
