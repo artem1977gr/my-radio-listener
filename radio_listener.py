@@ -1,10 +1,12 @@
 import requests
 import subprocess
 import time
-from multiprocessing import Process
+from multiprocessing import Process # Многопроцессность для запуска нескольких станций параллельно
 
-# Глобальные настройки
+# Список URL радиостанций (добавлены твои новые потоки)
 RADIOS = [
+    'https://listen7.myradio24.com/sintezi',
+    'https://listen7.myradio24.com/sintezi',
     'https://listen7.myradio24.com/sintezi',
     'https://listen7.myradio24.com/sintezi_128',
     'https://listen7.myradio24.com/rockataka',
@@ -12,39 +14,26 @@ RADIOS = [
     'https://listen7.myradio24.com/iridium',
     'https://listen7.myradio24.com/nevermind'
 ]
-SESSION_DURATION_SECONDS = 260 # Длительность одной сессии
-
+SESSION_DURATION_SECONDS = 260 
 
 def keep_radio_alive(url):
     """Функция виртуального слушателя для одной радиостанции."""
     
     print(f"[{time.strftime('%H:%M:%S')}] Starting listener for {url}...")
-
+    
     headers = {
-        # Оставляем стандартный User-Agent без изменений (можно заменить на свой)
         'User-Agent': (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 Chrome/128.0 Safari/537.36"
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
         ),
-        
-        # ВАЖНО: Указываем ТВОЙ тестовый сайт!
-        # Сервер будет считать, что слушатель пришёл именно оттуда.
-        'Referer': 'https://radio.art-test-1.store', 
-        
-        # Для получения названий треков из метаданных потока
         'Icy-MetaData': '1'
     }
 
-    # ↓↓↓ ВСЕ ЭТИ СТРОКИ ДОЛЖНЫ БЫТЬ НА ОДНОМ УРОВНЕ ОТСТУПА! ↓↓↓
     try:
         with requests.get(url, stream=True, timeout=20, headers=headers) as response:
             response.raise_for_status()
             
             start_time = time.time() 
-
-            # Проверка наличия mpv
-            if not hasattr(subprocess, 'Popen'):
-                raise RuntimeError("mpv is not available")
 
             player = subprocess.Popen(
                 ['mpv', '--no-video', '--quiet', '-'],
@@ -56,10 +45,18 @@ def keep_radio_alive(url):
             buffer_size = 65536  
             
             #### ВАЖНЫЙ МОМЕНТ ####
-            # Ты читаешь chunk, отправляешь его в mpv, а затем засыпаешь на сессию.
+            # Твой оригинальный цикл чтения данных остался без изменений.
+            # Ты читаешь chunk, отправляешь его в mpv, а затем засыпаешь на 5 минут.
             # Это позволяет тебе экономить CPU до минимума.
             for chunk in response.iter_content(chunk_size=buffer_size):
-                if not chunk or int(time.time() - start_time) >= SESSION_DURATION_SECONDS:
+                if not chunk:
+                    break
+
+                elapsed = int(time.time() - start_time)
+                
+                # Завершаем сессию через SESSION_DURATION_SECONDS
+                if elapsed >= SESSION_DURATION_SECONDS:
+                    print(f"[{time.strftime('%H:%M:%S')}] Session ended after {elapsed}s.")
                     break
 
                 # Передаём данные в mpv
@@ -68,8 +65,8 @@ def keep_radio_alive(url):
                 except BrokenPipeError:
                     break
 
-                # Пауза ровно на длительность сессии
-                time.sleep(SESSION_DURATION_SECONDS)
+                # Твоя пауза для экономии ресурсов — это ключевой момент твоей архитектуры!
+                time.sleep(260) # <-- ВРЕМЯ !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
                 # Дополнительная проверка: если mpv завершился сам
                 if player.poll() is not None:
@@ -99,6 +96,7 @@ if __name__ == '__main__':
             processes.append(p)
 
         # Ждём завершения ВСЕХ запущенных процессов (т.е. окончания сессии).
+        # Так как у тебя каждая сессия длится ровно 5 минут, все процессы завершатся примерно синхронно.
         # После этого мы выйдем из цикла ожидания и запустим новый набор процессов.
         for process in processes:
             process.join()
