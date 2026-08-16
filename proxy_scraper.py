@@ -1,114 +1,73 @@
-import time
-from urllib.parse import urlparse # Для правильной работы с URL
 import requests
-from bs4 import BeautifulSoup
-import re
-import socks
+from time import sleep
 
+# Список сайтов для парсинга
+sources = [
+    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all",
+    # Добавьте сюда другие источники
+]
 
-# Путь к выходному файлу (должен совпадать с тем, что указан в radio_listener.py)
-PROXY_FILE_PATH = "working_proxies.txt"
+working_proxies = []
 
+def check_proxy(proxy):
+    """Проверяет прокси на работоспособность."""
+    # Создаем сессию с этим прокси
+    session = requests.Session()
+    proxies = {
+        "http": f"http://{proxy}",
+        "https": f"http://{proxy}"
+    }
+    session.proxies.update(proxies)
 
-def fetch_free_proxy_list_net():
-    """Парсинг таблицы с Free-Proxy-List.net"""
-    url = "https://free-proxy-list.net/"
-    response = requests.get(url)
-    
-    soup = BeautifulSoup(response.text, 'html.parser')
-    table = soup.find('table', id='proxylisttable')
-    
-    proxies = []
-    for row in table.tbody.find_all('tr'):
-        cols = [td.text.strip() for td in row.find_all('td')]
-        
-        # Берём только анонимные HTTP(S) прокси без авторизации
-        if len(cols) >= 8 and cols[6] == 'yes' and not cols[4].startswith("SOCKS"):
-            ip = cols[0]
-            port = cols[1]
-            
-            # Простая проверка IP
-            if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip):
-                proxies.append(f"{ip}:{port}")
-    
-    return proxies
-
-
-def fetch_proxyscrape_api(country="ru"):
-    """
-    Получаем свежие прокси через ProxyScrape API.
-    country=ru -> Только российские IP-адреса.
-    """
-    api_url = (
-        f"https://api.proxyscrape.com/v2/?request=getproxies&protocol=http"
-        "&timeout=5000&anonymity=all"
-        f"&country={country}"
-    )
+    # 1) Пингуем Google через прокси (проверка доступности)
     try:
-        resp = requests.get(api_url)
-        return resp.text.splitlines()
+        response = session.get("http://www.google.com", timeout=5)
+        if response.status_code != 200:
+            print(f"[FAIL] {proxy} - Status code: {response.status_code}")
+            return False
     except Exception as e:
-        print(f"[ERROR] ProxyScrape API failed: {e}")
-        return []
+        print(f"[FAIL] {proxy} - Connection error:", str(e))
+        return False
 
-
-def check_proxy(proxy_str, target_url="https://listen7.myradio24.com/sintezi"):
-    """
-    Проверяет, может ли данный прокси пропустить потоковый контент.
-    Возвращает True/False и время ответа.
-    """
-    host, port = proxy_str.rsplit(":", 1)
-    port = int(port)
-
-    s = socks.socksocket()
-    s.set_proxy(socks.PROXY_TYPE_HTTP, host, port)
-    s.settimeout(10)  
-
-    parsed_url = target_url.split("/")[2] 
-    start_time = time.time()
-
+    # 2) Проверяем скорость ответа (оставляем порог в 3 секунды)
     try:
-        # Пробуем установить TCP-соединение с сервером вещания ЧЕРЕЗ ПРОКСИ.
-        # Если соединение прошло — значит, прокси пропускает аудиопоток.
-        s.connect((parsed_url, 80))
+        start_time = time.time()
+        _ = session.head('http://ip-api.com/json/', timeout=3)
+        end_time = time.time()
+        latency = round((end_time - start_time) * 1000, 2)
         
-        elapsed = time.time() - start_time
-        return True, elapsed  # Прокси работает!
-    except Exception as _:
-        return False, None  # Прокси мёртв или блокирует аудио
-
-
-def update_proxy_list():
-    """
-    Собирает бесплатные прокси из нескольких источников,
-    проверяет их и сохраняет в working_proxies.txt.
-    Сохраняет максимум 100 лучших по скорости.
-    """
-    all_sources = [
-        ("Free-Proxy-List.net", fetch_free_proxy_list_net()),
-        ("ProxyScrape API", fetch_proxyscrape_api())
-    ]
-
-    unique_proxies = set()
-    for source_name, proxy_list in all_sources:
-        print(f"\n[INFO] Found {len(proxy_list)} proxies from {source_name}.")
-        unique_proxies.update(proxy_list)
-
-    print(f"\n[INFO] Total unique proxies collected: {len(unique_proxies)}. Starting checks...")
-
-    working_proxies = {}
-    for i, proxy in enumerate(unique_proxies):
-        ok, latency = check_proxy(proxy)
-        if ok:
-            print(f"[OK] #{i+1} {proxy} works! Latency: {latency:.2f}s")
-            working_proxies[proxy] = latency
+        if latency > 3000:
+            print(f"[FAIL] {proxy} - Latency too high ({latency} ms)")
+            return False
         else:
-            print(f"[FAIL] #{i+1} {proxy} is dead.")
+            print(f"[OK] {proxy} - Latency: {latency} ms")
+    except Exception as e:
+        print(f"[FAIL] {proxy} - Speed test failed:", str(e))
+        return False
 
-    # Сортируем по времени отклика и берём первые 100
-    top_100 = dict(sorted(working_proxies.items(), key=lambda x: x[1])[:100])
+    # Если дошли до этого места — прокси прошел все тесты
+    working_proxies.append(proxy)
+    return True
 
-    with open(PROXY_FILE_PATH, "w") as f:
-        for proxy, latency in top_100.items():
-            print(f"Saving {proxy} with latency {latency:.2f}s")  # Лог для отладки
-            f.write(proxy + "\n")
+
+for source in sources:
+    print(f"\n[INFO] Scraping from {source}")
+    try:
+        resp = requests.get(source, timeout=10)
+        proxies_list = resp.text.splitlines()
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch data from {source}:", str(e))
+        continue
+
+    for proxy in proxies_list:
+        # Ставим небольшую задержку между проверками, чтобы не забанили
+        sleep(0.1)
+        check_proxy(proxy.strip())
+
+print("\n[INFO] Working proxies:")
+if len(working_proxies) == 0:
+    print("[WARNING] No working proxies found.")
+else:
+    with open("working_proxies.txt", "w") as file:
+        for p in working_proxies:
+            file.write(p + "\n")
