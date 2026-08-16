@@ -1,9 +1,9 @@
-name: Update Proxy List Daily at 4am Moscow Time
+name: Update Proxy List Hourly
 
 on:
   schedule:
-    # Запускаем ежедневно в 1:00 UTC (что соответствует 4:00 МСК)
-    - cron: '0 1 * * *'
+    # Запускать каждый час (в 0 минут каждого часа)
+    - cron: '0 * * * *'
 
 jobs:
   update-proxies:
