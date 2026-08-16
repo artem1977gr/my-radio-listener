@@ -1,11 +1,11 @@
 name: Update Proxy List Every 15 Minutes
 
 on:
-  # Запускаем по расписанию (каждые 15 минут)
+  # Запускаем по расписанию каждые 15 минут
   schedule:
     - cron: '*/15 * * * *'
   
-  # Добавляем возможность запуска вручную через кнопку в GitHub Actions
+  # Добавляем возможность запуска вручную
   workflow_dispatch:
 
 jobs:
@@ -16,15 +16,23 @@ jobs:
         with:
           fetch-depth: 0  # Нужно для того, чтобы коммитить изменения обратно в репозиторий
 
-      - name: Install dependencies 📦️
-        run: |
-          python3 -m venv .venv
-          source .venv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.txt
-
+      # Выводим ошибку в консоль, если скрипт упадёт
       - name: Run proxy scraper ✅
-        # Флаг -u заставляет Python выводить всё сразу без буферизации
         run: |
-          source .venv/bin/activate
-          python -u proxy_scraper.py 
+          /usr/bin/python3 -u proxy_scraper.py || echo "Script failed with error code $?"
+      
+      # Проверяем, что файл был создан
+      - name: Check if file exists ⚙️
+        run: |
+          ls -l working_proxies.txt
+          # Если файл существует, следующий шаг будет выполнен
+          # Если нет, это вызовет ошибку и остановит workflow
+
+      # Создаём коммит и пушим файл в репозиторий
+      - name: Commit and push changes 📤
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m "Update working proxies list" || echo "No changes to commit"
+          git push origin main
