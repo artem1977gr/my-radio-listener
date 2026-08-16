@@ -27,12 +27,8 @@ sources = [
     "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies_socks5.txt",
     "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt",
     "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt",
-    "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
+    "https://https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
     "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/proxy.txt",
-    "https://raw.githubusercontent.com/roosterkid/openproxylists/master/MIXED_ANON_HTTP.txt",
-    "https://raw.githubusercontent.com/roosterkid/openproxylists/master/HTTP_ANON_HTTP.txt",
-    "https://raw.githubusercontent.com/roosterkid/openproxylists/master/SOCKS4_ANON_HTTP.txt",
-    "https://raw.githubusercontent.com/roosterkid/openproxylists/master/SOCKS5_ANON_HTTP.txt"
 ]
 
 working_proxies = []
@@ -58,22 +54,28 @@ def check_proxy(proxy_str):
         session.proxies.update(proxies)
 
         try:
-            response = session.get("http://www.google.com", timeout=(2, 2))
-            if response.status_code != 200:
+            # Проверяем доступность через httpbin.org/ip (более безопасный способ)
+            response = session.get("https://httpbin.org/ip", timeout=(5, 10))
+            
+            # Метрика успеха №1: Статус-код 200 AND есть тело ответа
+            if response.status_code != 200 or len(response.text.strip()) < 10:
                 continue  # Следующий протокол
         except Exception as e:
             print(f"[FAIL] {full_proxy_url} - Connection error:", str(e))
             continue
 
         # Тест нашего конкретного аудио-потока
+        # Мы проверяем реальное получение данных из потока
         try:
+            # Проверим возможность получить данные из потока
             response = session.get("https://listen7.myradio24.com/iridium", stream=True, timeout=(5, 15))  
             
             start_time = get_current_time()
             data_chunk = response.raw.read(8192)  # Читаем примерно 8 КБ
             end_time = get_current_time()
 
-            if not data_chunk or len(data_chunk) < 100:
+            # Метрика успеха №2: Получено минимум 10 байт данных
+            if not data_chunk or len(data_chunk) < 10:
                 print(f"[FAIL] {full_proxy_url} - Audio stream failed")
                 return False
 
@@ -83,6 +85,8 @@ def check_proxy(proxy_str):
             latency = round((end_time - start_time) * 1000, 2)
 
             # Минимальная скорость ~20 KB/s.
+            # Для комфортного стриминга нужно больше,
+            # но мы можем снизить порог до 15–16 KB/s при необходимости.
             if speed_kbps < 20:
                 print(f"[FAIL] {full_proxy_url} - Speed too low ({speed_kbps:.2f} KB/s)")
                 return False
