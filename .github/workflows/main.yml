@@ -1,9 +1,9 @@
-name: Update Proxy List Every 15 Minutes
+name: Update Proxy List Every Day at 04:15 Moscow Time
 
 on:
-  # Запускаем по расписанию каждые 15 минут
+  # Запускаем по расписанию каждый день в 01:15 UTC (это 04:15 по Москве)
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '15 1 * * *'
   
   # Добавляем возможность запуска вручную
   workflow_dispatch:
