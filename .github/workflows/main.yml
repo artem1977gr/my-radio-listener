@@ -1,0 +1,22 @@
+name: Update Proxy List Daily at 4am Moscow Time
+
+on:
+  schedule:
+    # Запускаем ежедневно в 1:00 UTC (что соответствует 4:00 МСК)
+    - cron: '0 1 * * *'
+
+jobs:
+  update-proxies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install dependencies
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt  # Должен содержать pysocks, bs4, requests
+      - name: Run proxy scraper
+        run: |
+          source .venv/bin/activate
+          python proxy_scraper.py
