@@ -16,19 +16,25 @@ jobs:
         with:
           fetch-depth: 0  # Нужно для того, чтобы коммитить изменения обратно в репозиторий
 
-      # Выводим ошибку в консоль, если скрипт упадёт
+      # Создаём виртуальное окружение и устанавливаем зависимости
+      - name: Install dependencies ⚙️
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt
+
+      # Проверяем работу парсера и ловим все возможные ошибки
       - name: Run proxy scraper ✅
         run: |
-          /usr/bin/python3 -u proxy_scraper.py || echo "Script failed with error code $?"
+          source .venv/bin/activate && python -u proxy_scraper.py || echo "Script failed with error code $?"
       
-      # Проверяем, что файл был создан
-      - name: Check if file exists ⚙️
+      # Проверяем, был ли создан файл с прокси
+      - name: Check if file exists ❗️
         run: |
           ls -l working_proxies.txt
           # Если файл существует, следующий шаг будет выполнен
           # Если нет, это вызовет ошибку и остановит workflow
 
-      # Создаём коммит и пушим файл в репозиторий
+      # Отправка файла в репозиторий
       - name: Commit and push changes 📤
         run: |
           git config --local user.email "action@github.com"
