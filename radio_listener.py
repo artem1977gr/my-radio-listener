@@ -7,12 +7,10 @@ import random
 
 # Глобальные настройки (твои текущие)
 RADIOS = [
-    *(['https://listen7.myradio24.com/sintezi'] * 10),
-    *(['https://listen7.myradio24.com/sintezi_128'] * 1),
-    *(['https://listen7.myradio24.com/rockataka'] * 3), 
-    *(['https://listen7.myradio24.com/rockataka_128'] * 1),
-    *(['https://listen7.myradio24.com/iridium'] * 3),
-    *(['https://listen7.myradio24.com/nevermind'] * 3)
+    *(['https://listen7.myradio24.com/sintezi'] * 20),
+    *(['https://listen7.myradio24.com/rockataka'] * 10), 
+    *(['https://listen7.myradio24.com/iridium'] * 10),
+    *(['https://listen7.myradio24.com/nevermind'] * 20)
 ]
 REFERER_URL = "https://radio.art-test-1.store"
 SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин
