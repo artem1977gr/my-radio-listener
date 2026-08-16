@@ -9,7 +9,8 @@ import re  # <--- Добавлено для регулярных выражен�
 
 # ⚡️ НАИБОЛЕЕ НАДЁЖНЫЕ ИСТОЧНИКИ + дополнительные HTTP(S)
 sources = [
-    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=html",  # Без country=all
+    # Правильные параметры для API
+    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000",
     "https://www.proxy-list.download/api/v1/get?type=http&anon=elite",
     
     # Дополнительные надёжные источники
@@ -191,19 +192,23 @@ if __name__ == "__main__":
             # Анти-DDoS защита источника: случайная задержка
             sleep(random.uniform(1, 3))
 
-            # ✅ Защита от невалидных данных
-            # Вместо простого resp.text.splitlines() используем нашу новую функцию
             try:
                 resp = requests.get(source, timeout=10)
-                # Фильтруем строки прямо при получении ответа!
-                all_proxies.extend(load_proxies_from_source(resp.text))
+                
+                # ✅ Защита от невалидных данных прямо здесь!
+                # Фильтруем строки ДО добавления их в общий массив.
+                # Это гарантирует, что в all_proxies никогда не попадёт мусор.
+                valid_lines = load_proxies_from_source(resp.text)
+
+                # Проверяем, что мы получили хоть что-то валидное
+                if len(valid_lines) == 0:
+                    print("[WARNING] Source returned no valid proxies.")
+                else:
+                    all_proxies.extend(valid_lines)
+
             except Exception as e:
                 print(f"[ERROR] Failed to fetch data from {source}:", str(e))
                 continue
-
-        # Сохраняем кэш
-        with open(cached_sources_file, "w") as cache_file:
-            json.dump(all_proxies, cache_file)
 
     # Проверяем новые адреса
     found_new_proxies = []
