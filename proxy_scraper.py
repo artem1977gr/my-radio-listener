@@ -4,11 +4,12 @@ import datetime
 import os  # Для переименования файла под workflow
 import random
 import json
+import re  # <--- Добавлено для регулярных выражений
 
 
 # ⚡️ НАИБОЛЕЕ НАДЁЖНЫЕ ИСТОЧНИКИ + дополнительные HTTP(S)
 sources = [
-    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000",  # Без country=all
+    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=html",  # Без country=all
     "https://www.proxy-list.download/api/v1/get?type=http&anon=elite",
     
     # Дополнительные надёжные источники
@@ -29,6 +30,22 @@ user_agents = [  # Ротация UA
 ]
 
 working_proxies = []  # Сюда будут попадать только прошедшие проверку
+
+# Регулярное выражение для проверки формата IPv4:Port
+PROXY_PATTERN = re.compile(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?):\d+$')
+
+def load_proxies_from_source(raw_text):
+    """Загружает прокси из сырого текста, фильтруя по формату."""
+    lines = raw_text.splitlines()
+    valid_proxies = []
+    
+    for line in lines:
+        candidate = line.strip()
+        # Проверяем, похожа ли строка на прокси, и нет ли в ней HTML-тегов или мусора
+        if PROXY_PATTERN.match(candidate) and '<' not in candidate and '>' not in candidate:
+            valid_proxies.append(candidate)
+            
+    return valid_proxies
 
 def check_proxy(proxy_str):
     """Проверка одного IP:PORT."""
@@ -174,9 +191,12 @@ if __name__ == "__main__":
             # Анти-DDoS защита источника: случайная задержка
             sleep(random.uniform(1, 3))
 
+            # ✅ Защита от невалидных данных
+            # Вместо простого resp.text.splitlines() используем нашу новую функцию
             try:
                 resp = requests.get(source, timeout=10)
-                all_proxies.extend(resp.text.splitlines())
+                # Фильтруем строки прямо при получении ответа!
+                all_proxies.extend(load_proxies_from_source(resp.text))
             except Exception as e:
                 print(f"[ERROR] Failed to fetch data from {source}:", str(e))
                 continue
