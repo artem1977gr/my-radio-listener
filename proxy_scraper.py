@@ -35,7 +35,6 @@ sources = [
     "https://raw.githubusercontent.com/roosterkid/openproxylists/master/SOCKS5_ANON_HTTP.txt"
 ]
 
-# Список найденных прокси теперь хранит скорость загрузки данных
 working_proxies = []
 
 def check_proxy(proxy_str):
@@ -49,24 +48,25 @@ def check_proxy(proxy_str):
 
     for protocol in protocols_to_check:
         session = requests.Session()
+        
+        # ✅ Правильная сборка полного URL для прокси
+        full_proxy_url = f"{protocol}://{proxy_str}"
         proxies = {
-            "http": f"{protocol}://{proxy_str}",
-            "https": f"{protocol}://{protocol}://{proxy_str}"
+            "http": full_proxy_url,
+            "https": full_proxy_url
         }
         session.proxies.update(proxies)
 
         try:
-            # Уменьшил таймауты для пинга Google до (2, 2). Это ускорит проверку.
             response = session.get("http://www.google.com", timeout=(2, 2))
             if response.status_code != 200:
                 continue  # Следующий протокол
-        except Exception:
+        except Exception as e:
+            print(f"[FAIL] {full_proxy_url} - Connection error:", str(e))
             continue
 
         # Тест нашего конкретного аудио-потока
-        # Мы проверяем реальное получение данных из потока
         try:
-            # Проверим возможность получить данные из потока
             response = session.get("https://listen7.myradio24.com/iridium", stream=True, timeout=(5, 15))  
             
             start_time = get_current_time()
@@ -74,7 +74,7 @@ def check_proxy(proxy_str):
             end_time = get_current_time()
 
             if not data_chunk or len(data_chunk) < 100:
-                print(f"[FAIL] {protocol}:{proxy_str} - Audio stream failed")
+                print(f"[FAIL] {full_proxy_url} - Audio stream failed")
                 return False
 
             elapsed_seconds = end_time - start_time
@@ -83,18 +83,16 @@ def check_proxy(proxy_str):
             latency = round((end_time - start_time) * 1000, 2)
 
             # Минимальная скорость ~20 KB/s.
-            # Для комфортного стриминга нужно больше,
-            # но мы можем снизить порог, т.к. дальше будет буферизация в боте.
             if speed_kbps < 20:
-                print(f"[FAIL] {protocol}:{proxy_str} - Speed too low ({speed_kbps:.2f} KB/s)")
+                print(f"[FAIL] {full_proxy_url} - Speed too low ({speed_kbps:.2f} KB/s)")
                 return False
 
-            # Теперь сохраняем кортеж: (скорость, полный URL)
-            working_proxies.append((speed_kbps, f"{protocol}://{proxy_str}"))
-            print(f"[OK] {protocol}:{proxy_str} - Latency: {latency} ms | Speed: {speed_kbps:.2f} KB/s")
+            # Сохраняем кортеж: (скорость, готовый URL)
+            working_proxies.append((speed_kbps, full_proxy_url))
+            print(f"[OK] {full_proxy_url} - Latency: {latency} ms | Speed: {speed_kbps:.2f} KB/s")
             return True
         except Exception as e:
-            print(f"[FAIL] {protocol}:{protocol}:{proxy_str} - Audio test failed:", str(e))
+            print(f"[FAIL] {full_proxy_url} - Audio test failed:", str(e))
             break
 
 
