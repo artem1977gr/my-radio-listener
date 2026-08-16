@@ -3,35 +3,17 @@ from time import sleep, time as get_current_time
 import datetime
 import os  # Для переименования файла под workflow
 
-# ⚡️ НАИБОЛЕЕ НАДЁЖНЫЕ ИСТОЧНИКИ — ВНАЧАЛЕ СПИСКА!
+# ⚡️ НАИБОЛЕЕ НАДЁЖНЫЕ ИСТОЧНИКИ + дополнительные HTTP(S)
 sources = [
-    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all",  # API HTTP(S)
-    "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/http.txt",
+    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000",  # Без country=all
+    "https://www.proxy-list.download/api/v1/get?type=http&anon=elite",
     
-    # Остальные источники идут после них
-    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks4&timeout=10000&country=all",
-    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks5&timeout=10000&country=all",
-    "https://www.proxy-list.download/api/v1/get?type=http&anon=elite",  # Только элитные анонимные
-    "https://www.proxy-list.download/api/v1/get?type=socks4",
-    "https://www.proxy-list.download/api/v1/get?type=socks5",
-
-    # Текстовые файлы с GitHub
-    "https://raw.githubusercontent.com/Hitsounds/proxy-scraper/main/proxies/free_proxies.txt",
-    "https://raw.githubusercontent.com/Hitsounds/proxy-scraper/main/proxies/premium_proxies.txt",
-    "https://raw.githubusercontent.com/RichardLitt/awesome-proxies/master/proxies.json",  # JSON-файл, но скрипт умеет парсить текст
-    "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
-    "https://raw.githubusercontent.com/hendrikbgr/Free-Proxy-Repo/master/proxy_list.txt",
-    "https://raw.githubusercontent.com/shiftytr/proxy-list/master/proxy.txt",
-    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies_http.txt",
-    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies_socks4.txt",
-    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies_socks5.txt",
-    "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt",
-    "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt",
-    "https://https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
-    "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/proxy.txt",
+    # Дополнительные надёжные источники
+    "https://raw.githubusercontent.com/roosterkid/openproxylists/master/MIXED_ANON_HTTP.txt",  # Текстовый файл с GitHub
+    "https://api.openproxylist.xyz/http.txt"  # Простой API без параметров
 ]
 
-working_proxies = []
+working_proxies = []  # Сюда будут попадать только прошедшие проверку
 
 def check_proxy(proxy_str):
     """Проверка одного IP:PORT."""
@@ -45,7 +27,6 @@ def check_proxy(proxy_str):
     for protocol in protocols_to_check:
         session = requests.Session()
         
-        # ✅ Правильная сборка полного URL для прокси
         full_proxy_url = f"{protocol}://{proxy_str}"
         proxies = {
             "http": full_proxy_url,
@@ -54,8 +35,7 @@ def check_proxy(proxy_str):
         session.proxies.update(proxies)
 
         try:
-            # Проверяем доступность через httpbin.org/ip (более безопасный способ)
-            response = session.get("https://httpbin.org/ip", timeout=(5, 10))
+            response = session.get("https://httpbin.org/ip", timeout=(5, 10), verify=False)
             
             # Метрика успеха №1: Статус-код 200 AND есть тело ответа
             if response.status_code != 200 or len(response.text.strip()) < 10:
@@ -65,9 +45,7 @@ def check_proxy(proxy_str):
             continue
 
         # Тест нашего конкретного аудио-потока
-        # Мы проверяем реальное получение данных из потока
         try:
-            # Проверим возможность получить данные из потока
             response = session.get("https://listen7.myradio24.com/iridium", stream=True, timeout=(5, 15))  
             
             start_time = get_current_time()
@@ -85,13 +63,10 @@ def check_proxy(proxy_str):
             latency = round((end_time - start_time) * 1000, 2)
 
             # Минимальная скорость ~20 KB/s.
-            # Для комфортного стриминга нужно больше,
-            # но мы можем снизить порог до 15–16 KB/s при необходимости.
             if speed_kbps < 20:
                 print(f"[FAIL] {full_proxy_url} - Speed too low ({speed_kbps:.2f} KB/s)")
                 return False
 
-            # Сохраняем кортеж: (скорость, готовый URL)
             working_proxies.append((speed_kbps, full_proxy_url))
             print(f"[OK] {full_proxy_url} - Latency: {latency} ms | Speed: {speed_kbps:.2f} KB/s")
             return True
@@ -101,12 +76,27 @@ def check_proxy(proxy_str):
 
 
 if __name__ == "__main__":
-    # Запускаем таймер перед циклом парсинга
-    start_script_time = datetime.datetime.now()
-    MAX_WORK_TIME_MINUTES = 25  # Увеличенный лимит времени
-    TARGET_PROXY_COUNT = 30  # Цель — найти именно столько
+    MAX_WORK_TIME_MINUTES = 25
+    TARGET_PROXY_COUNT = 30
 
-    found_count = 0
+    # Загружаем старый файл с предыдущими рабочими прокси
+    old_proxies = []
+    try:
+        with open("working_proxies.txt", "r") as file:
+            old_proxies = [line.strip() for line in file.readlines()]
+        print("[INFO] Previous proxy list loaded.")
+    except FileNotFoundError:
+        print("[INFO] Previous proxy list not found.")
+
+    # Проверяем сначала все старые прокси
+    print("\n[INFO] Checking previous working proxies...")
+    for proxy in old_proxies:
+        # Мы уже знаем полный URL, так что сразу передаём его целиком
+        result = check_proxy(proxy.replace('http://', '').replace('socks5://', ''))
+
+    # Теперь проверяем новые источники
+    print("\n[INFO] Fetching and checking new proxies...")
+    start_script_time = datetime.datetime.now()
 
     for source in sources:
         print(f"\n[INFO] Scraping from {source}")
@@ -121,19 +111,27 @@ if __name__ == "__main__":
         for proxy in proxies_list:
             # Проверка лимита времени или количества
             elapsed_minutes = (datetime.datetime.now() - start_script_time).total_seconds() / 60
-            if elapsed_minutes >= MAX_WORK_TIME_MINUTES or found_count >= TARGET_PROXY_COUNT:
-                print("[WARNING] Script has reached the target number of proxies or time limit.")
+            if elapsed_minutes >= MAX_WORK_TIME_MINUTES:
+                print("[WARNING] Script has reached the time limit.")
                 break
 
             sleep(0.1)
             result = check_proxy(proxy.strip())
-            if result:
-                found_count += 1
 
     # ✅ СОРТИРУЕМ ПО СКОРОСТИ ОТ БОЛЬШЕЙ К МЕНЬШЕЙ
     sorted_proxies = sorted(working_proxies, key=lambda x: x[0], reverse=True)
 
-    # СРАЗУ СОХРАНЯЕМ В ФАЙЛ, КОТОРЫЙ ЖДЁТ GITHUB ACTIONS
+    # Разделяем на старые и новые
+    sorted_old_proxies = [(speed, url) for speed, url in sorted_proxies if url in old_proxies]
+    sorted_new_proxies = [(speed, url) for speed, url in sorted_proxies if url not in old_proxies]
+
+    # Сохраняем ВСЕ старые рабочие прокси, а затем добавляем недостающее количество новых
     with open("working_proxies.txt", "w") as file:
-        for _, p in sorted_proxies[:TARGET_PROXY_COUNT]:  # Берём первые 30 самых быстрых
+        # Пишем ВСЕ старые
+        for _, p in sorted_old_proxies:
+            file.write(p + "\n")
+        
+        # Добавляем новые до достижения цели
+        needed_count = max(TARGET_PROXY_COUNT - len(sorted_old_proxies), 0)
+        for i, (_, p) in enumerate(sorted_new_proxies[:needed_count]):
             file.write(p + "\n")
