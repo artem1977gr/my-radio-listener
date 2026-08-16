@@ -1,21 +1,28 @@
 name: Update Proxy List Every 15 Minutes
 
 on:
+  # Запускаем по расписанию (каждые 15 минут)
   schedule:
-    # Запускаем каждые 15 минут (в 0, 15, 30, 45)
     - cron: '*/15 * * * *'
+  
+  # Добавляем возможность запуска вручную через кнопку в GitHub Actions
+  workflow_dispatch:
 
 jobs:
   update-proxies:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Install dependencies
+        with:
+          fetch-depth: 0  # Нужно для того, чтобы коммитить изменения обратно в репозиторий
+
+      - name: Install dependencies 📦️
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
           pip install --upgrade pip
-          pip install -r requirements.txt  # Должен содержать pysocks, bs4, requests
+          pip install -r requirements.txt
+
       - name: Run proxy scraper ✅
         # Флаг -u заставляет Python выводить всё сразу без буферизации
         run: |
