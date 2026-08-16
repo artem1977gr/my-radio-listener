@@ -17,6 +17,7 @@ SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин
 SESSION_DURATION_MAX = 1600  # Максимум ~27 минут
 READ_TIMEOUT_SEC = 5        # Ключевое изменение!
 
+
 #### ⚡️ НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
 PLATFORM_WEIGHTS = [  # Веса для платформ
     {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  # Стационарные ПК
@@ -32,15 +33,16 @@ PLATFORM_WEIGHTS = [  # Веса для платформ
 ]
 
 BROWSER_WEIGHTS = [  # Веса для браузеров
-    {"name": "Chrome", "version": "129.0.0.", "weight": 0.6},  # Доминирует
-    {"name": "Firefox", "version": "121.0.", "weight": 0.2},
+    {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},  # Доминирует
+    {"name": "Firefox", "version": "121.0", "weight": 0.2},
     {"name": "Safari", "version": "605.1.15", "weight": 0.1},
-    {"name": "Edge", "version": "120.0.2210.", "weight": 0.05},
-    {"name": "Opera", "version": "98.0.4825.", "weight": 0.05}
+    {"name": "Edge", "version": "120.0.2210.57", "weight": 0.05},
+    {"name": "Opera", "version": "98.0.4825.16", "weight": 0.05}
 ]
 
+
 def generate_user_agent():
-    """Генерирует максимально реалистичный User-Agent."""
+    """Генерирует реалистичный User-Agent."""
     #### ВЫБИРАЕМ ПЛАТФОРМУ ПО ВЕСАМ ####
     total_weight_platforms = sum(item["weight"] for item in PLATFORM_WEIGHTS)
     choice = random.uniform(0, total_weight_platforms)
@@ -61,24 +63,17 @@ def generate_user_agent():
             browser_data = brw
             break
     
-    #### СОБИРАЕМ СТРОКУ С НОМЕРОМ СБОРКИ И РАСШИРЕННЫМ ДИАПАЗОНОМ ####
+    #### СОБИРАЕМ СТРОКУ ####
     ua_template = (
         f"Mozilla/5.0 ({platform_data['os']} {platform_data.get('version', '')}; "
         f"{platform_data.get('arch', '')} {platform_data.get('model', '')}) "
-        
-        # Расширенный диапазон для движка Safari/WebKit
-        f"AppleWebKit/{random.randint(533, 539)}.{random.randint(1, 99)} "
-        f"(KHTML, like Gecko) "
-        
-        # Имя браузера + версия + РАСШИРЕННЫЙ НОМЕР СБОРКИ
-        f"{browser_data['name']}/{browser_data['version']}"
-        f"{random.randint(100, 999)} "  # <-- Новый элемент: build number
-        
-        # Версия самого Safari (для iOS/Mac)
-        f"Safari/53{random.randint(3, 9)}.{random.randint(1, 99)}"
+        f"AppleWebKit/{random.randint(537, 605)}.{random.randint(1, 36)} "
+        f"(KHTML, like Gecko) {browser_data['name']}/{browser_data['version']} "
+        f"Safari/537.{random.randint(30, 40)}"
     )
     
     return ua_template.strip()
+
 
 def keep_radio_alive(url):
     parsed_url = urlparse(url)
@@ -132,6 +127,7 @@ def keep_radio_alive(url):
         finally:
             elapsed = int(time.time() - start_time)
             print(f"[{elapsed//60}:{elapsed%60:02d}] Listener on {url} ended.")
+
 
 if __name__ == "__main__":
     processes = []
