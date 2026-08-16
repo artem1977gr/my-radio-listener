@@ -3,7 +3,7 @@ from urllib.parse import urlparse # Для правильной работы с 
 import requests
 from bs4 import BeautifulSoup
 import re
-import socks  # pip install pysocks
+import socks
 
 
 # Путь к выходному файлу (должен совпадать с тем, что указан в radio_listener.py)
@@ -82,6 +82,7 @@ def update_proxy_list():
     """
     Собирает бесплатные прокси из нескольких источников,
     проверяет их и сохраняет в working_proxies.txt.
+    Сохраняет максимум 100 лучших по скорости.
     """
     all_sources = [
         ("Free-Proxy-List.net", fetch_free_proxy_list_net()),
@@ -104,8 +105,10 @@ def update_proxy_list():
         else:
             print(f"[FAIL] #{i+1} {proxy} is dead.")
 
-    sorted_proxies = dict(sorted(working_proxies.items(), key=lambda x: x[1]))
+    # Сортируем по времени отклика и берём первые 100
+    top_100 = dict(sorted(working_proxies.items(), key=lambda x: x[1])[:100])
 
     with open(PROXY_FILE_PATH, "w") as f:
-        for proxy, _ in sorted_proxies.items():
+        for proxy, latency in top_100.items():
+            print(f"Saving {proxy} with latency {latency:.2f}s")  # Лог для отладки
             f.write(proxy + "\n")
