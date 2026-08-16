@@ -4,10 +4,6 @@ import datetime
 import os  # Для переименования файла под workflow
 import random
 import json
-import certifi  # Доверенные корневые сертификаты
-import ipinfo
-from urllib3.util.retry import Retry
-from urllib3.poolmanager import PoolManager
 
 
 # ⚡️ НАИБОЛЕЕ НАДЁЖНЫЕ ИСТОЧНИКИ + дополнительные HTTP(S)
@@ -20,19 +16,11 @@ sources = [
     "https://api.openproxylist.xyz/http.txt"  # Простой API без параметров
 ]
 
-# Настройки таймаутов
-PING_TIMEOUT_CONNECT = 5
+# Настройки адаптивных таймаутов
+PING_TIMEOUT_CONNECT = 5   # Быстрый пинг
 PING_TIMEOUT_READ = 7
-STREAM_TIMEOUT_CONNECT = 5
+STREAM_TIMEOUT_CONNECT = 5  # Тест потока
 STREAM_TIMEOUT_READ = 20
-
-# Пул соединений
-pool_manager = PoolManager(
-    num_pools=10,
-    maxsize=50,
-    retries=Retry(total=3, backoff_factor=0.1),
-    ca_certs=certifi.where()  # Нормальные сертификаты!
-)
 
 user_agents = [  # Ротация UA
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -40,19 +28,17 @@ user_agents = [  # Ротация UA
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15'
 ]
 
-# Метаданные IP
-ipinfo_handler = ipinfo.getHandler('YOUR_IPINFO_TOKEN_HERE')  # Замените токен!
+working_proxies = []  # Сюда будут попадать только прошедшие проверку
 
 def check_proxy(proxy_str):
     """Проверка одного IP:PORT."""
     
     if ':' not in proxy_str:
-        return False  # Не валидный формат
+        return None  # Не валидный формат
 
     ip, port = proxy_str.split(':')
 
-    # 📌 Логика пересечений: один IP может быть валиден на нескольких портах
-    # Мы проверяем все протоколы, но сохраняем только те, что прошли тест
+    # 📌 Логика пересечений: один IP может быть валиден сразу на нескольких портах
     protocols_to_check = ['socks5h', 'http'] if int(port) in [1080, 443, 8080] else ['http']
 
     results = []
@@ -66,7 +52,7 @@ def check_proxy(proxy_str):
             "https": full_proxy_url
         }
 
-        adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=50, pool_block=True)
+        adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=50)
         session.mount('http://', adapter)
         session.mount('https://', adapter)
 
@@ -80,13 +66,9 @@ def check_proxy(proxy_str):
             # Валидируем ТЕЛО ОТВЕТА
             data = response.json()
             origin = data.get('origin')
-            if response.status_code != 200 or not isinstance(origin, str):
+            # Проверяем, что это именно наш IP, а не заглушка провайдера или HTML-код ошибки
+            if response.status_code != 200 or not isinstance(origin, str) or ip not in origin:
                 continue  # Следующий протокол
-
-            # Получаем метаданные
-            details = ipinfo_handler.getDetails(ip)
-            asn = details.asn
-            country = details.country_name
 
             # 📌 Симметрия портов
             # Игнорируем порты из вашего входящего диапазона (например, если вы слушаете на 8080–8090)
@@ -123,13 +105,11 @@ def check_proxy(proxy_str):
                 print(f"[FAIL] {full_proxy_url} - Speed too low ({speed_kbps:.2f} KB/s)")
                 return None
 
-            # Возвращаем результат как словарь
+            # Сохраняем результат как словарь
             result = {
                 'url': full_proxy_url,
                 'latency_ms': latency,
                 'speed_kbps': speed_kbps,
-                'asn': asn,
-                'country': country
             }
             results.append(result)
 
@@ -156,7 +136,7 @@ if __name__ == "__main__":
             lines = file.readlines()
             for line in lines:
                 parts = line.strip().split('|')
-                url = parts[0].strip()
+                url = parts[0].strip()  # Берём только URL
                 ip = url.split('//')[1].split(':')[0]
                 ports = old_proxies_dict.setdefault(ip, set())
                 ports.add(url)
@@ -239,12 +219,6 @@ if __name__ == "__main__":
 
     # Сохраняем основной рабочий файл
     with open("working_proxies.txt", "w") as file:
+        # Формат: URL | Latency ms | Speed KB/s
         for item in final_list:
-            # Формат: URL | Latency ms | Speed KB/s | ASN | Country
-            file.write(f"{item['url']} | {item['latency_ms']} | {item['speed_kbps']:.2f} | {item['asn']} | {item['country']}\n")
-
-    # Сохраняем резервный список (всё, что нашлось сверх цели)
-    reserve_list = sorted_items[total_target_count:]
-    with open("reserve_proxies.txt", "w") as file:
-        for item in reserve_list:
-            file.write(f"{item['url']} | {item['latency_ms']} | {item['speed_kbps']:.2f} | {item['asn']} | {item['country']}\n")
+            file.write(f"{item['url']} | {item['latency_ms']} | {item['speed_kbps']:.2f}\n")
