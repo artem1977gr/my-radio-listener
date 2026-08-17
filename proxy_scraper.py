@@ -9,8 +9,7 @@ import re  # <--- Добавлено для регулярных выражен�
 
 # ⚡️ НАИБОЛЕЕ НАДЁЖНЫЕ ИСТОЧНИКИ + дополнительные HTTP(S)
 sources = [
-    # Правильные параметры для API
-    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000",
+    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000",  # Без country=all
     "https://www.proxy-list.download/api/v1/get?type=http&anon=elite",
     
     # Дополнительные надёжные источники
@@ -36,7 +35,7 @@ working_proxies = []  # Сюда будут попадать только про
 PROXY_PATTERN = re.compile(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?):\d+$')
 
 def load_proxies_from_source(raw_text):
-    """Загружает прокси из сырого текста, фильтруя по формату."""
+    """Загружает прокси из сырого текста, фильтируя по формату."""
     lines = raw_text.splitlines()
     valid_proxies = []
     
@@ -151,13 +150,29 @@ if __name__ == "__main__":
     old_proxies_dict = {}
     try:
         with open("working_proxies.txt", "r") as file:
-            lines = file.readlines()
-            for line in lines:
-                parts = line.strip().split('|')
-                url = parts[0].strip()  # Берём только URL
-                ip = url.split('//')[1].split(':')[0]
-                ports = old_proxies_dict.setdefault(ip, set())
-                ports.add(url)
+            # ✅ Улучшенная логика разбора!
+            for line in file:
+                try:
+                    # Разделяем строку по вертикальной черте
+                    parts = line.strip().split('|')
+                    
+                    # Первая колонка должна быть URL вида http(s)/socks5h://IP:PORT
+                    url = parts[0].strip() 
+
+                    # Извлекаем чистый IP:PORT
+                    _, address = url.split('://')[:2]
+                    ip_port = address.split(':')
+
+                    # Проверка: должен быть ровно два элемента (IP и PORT), и порт — число
+                    if len(ip_port) != 2 or not ip_port[1].isdigit():
+                        raise ValueError("Invalid format")
+
+                    ip, _port = ip_port
+                    ports = old_proxies_dict.setdefault(ip, {})
+                    ports[url] = True  # Просто помечаем этот URL как ранее найденный
+                except Exception as e:
+                    print(f"[WARNING] Skipping invalid previous proxy '{line.strip()}': {e}")
+    
         print("[INFO] Previous proxy list loaded.")
     except FileNotFoundError:
         pass
@@ -213,7 +228,7 @@ if __name__ == "__main__":
     # Проверяем новые адреса
     found_new_proxies = []
     for proxy in all_proxies:
-        # Проверка лимита времени
+        # Проверка лимита времени или количества
         elapsed_minutes = (datetime.datetime.now() - start_script_time).total_seconds() / 60
         if elapsed_minutes >= MAX_WORK_TIME_MINUTES:
             break
