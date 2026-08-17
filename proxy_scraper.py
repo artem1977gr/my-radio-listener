@@ -82,7 +82,7 @@ def check_proxy(proxy_str):
         try:
             # Этап 1: Быстрый пинг через https://httpbin.org/ip
             response = session.get("https://httpbin.org/ip", timeout=(PING_TIMEOUT_CONNECT, PING_TIMEOUT_READ))
-            
+
             ### Защита от любых серверных ошибок ###
             # Если сервер вернул код >= 400 (любая ошибка), мы просто пропускаем этот адрес.
             # Это защитит нас от падений на HTML-страницах ошибок типа 502 Bad Gateway.
@@ -94,7 +94,7 @@ def check_proxy(proxy_str):
             data = response.json()  # Здесь больше не будет ValueError!
             origin = data.get('origin')
 
-            # Проверяем, что это именно наш IP, а не заглушка провайдера или HTML-код ошибки
+            # Проверяем, что это именно наш IP, а не заглушка провайдера
             if response.status_code != 200 or not isinstance(origin, str) or ip not in origin:
                 continue  # Следующий протокол
 
@@ -160,30 +160,26 @@ if __name__ == "__main__":
     old_proxies_dict = {}
     try:
         with open("working_proxies.txt", "r") as file:
-            # ✅ ДВОЙНАЯ ЗАЩИТА ОТ МУСОРА В СТАРОМ ФАЙЛЕ
+            # Строгий разбор каждой строки старого файла
             for line in file:
                 parts = line.strip().split('|')
-                
-                # Первая колонка должна быть URL вида http(s)/socks5h://IP:PORT
                 url = parts[0].strip()
-
+                
                 # Извлекаем чистый IP:PORT
                 _, address = url.split('://')[:2]
+                ip_port = address.split(':')
 
                 # Проверка регуляркой: должен соответствовать формату IPv4:Port
                 if not PROXY_PATTERN.match(address):
                     raise ValueError(f"Invalid format: {address}")
 
                 # Разбиваем на IP и PORT
-                ip_port = address.split(':')
-
-                # Проверка: должен быть ровно два элемента (IP и PORT), и порт — число
                 if len(ip_port) != 2 or not ip_port[1].isdigit():
                     raise ValueError(f"Invalid format: {url}")
 
                 ip, _port = ip_port
                 ports = old_proxies_dict.setdefault(ip, {})
-                ports[url] = True  # Просто помечаем этот URL как ранее найденный
+                ports[url] = True  # Просто помечаем URL как ранее найденный
     
         print("[INFO] Previous proxy list loaded.")
     except FileNotFoundError:
@@ -206,8 +202,11 @@ if __name__ == "__main__":
     # Пробуем сначала загрузить из кэша
     try:
         with open(cached_sources_file, "r") as cache_file:
-            all_proxies = json.load(cache_file)
-        print("[INFO] Proxy lists loaded from cache.")
+            # ✅ Всегда проверяем кэшированные данные тем же способом,
+            # чтобы исключить любые ошибки разбора
+            cached_data = json.load(cache_file)
+            all_proxies = load_proxies_from_source("\n".join(cached_data))
+    
     except FileNotFoundError:
         pass
 
@@ -222,7 +221,6 @@ if __name__ == "__main__":
             try:
                 resp = requests.get(source, timeout=10)
                 
-                # ✅ Защита от невалидных данных прямо здесь!
                 # Фильтруем строки ДО добавления их в общий массив.
                 # Это гарантирует, что в all_proxies никогда не попадёт мусор.
                 valid_lines = load_proxies_from_source(resp.text)
@@ -236,6 +234,10 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"[ERROR] Failed to fetch data from {source}:", str(e))
                 continue
+
+        # ✅ Сохраняем кэш только после того, как все источники прошли фильтрацию
+        with open(cached_sources_file, "w") as cache_file:
+            json.dump(all_proxies, cache_file)
 
     # Проверяем новые адреса
     found_new_proxies = []
