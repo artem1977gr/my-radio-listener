@@ -10,9 +10,8 @@ from bs4 import BeautifulSoup
 
 # ⚡️ НАИБОЛЕЕ ПОЛНЫЙ СПИСОК ИСТОЧНИКОВ БЕСПЛАТНЫХ HTTP-ПРОКСИ
 sources = [
-    {"name": "proxyscrape_http", "url": "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http"},
-    {"name": "proxyscrape_socks4", "url": "https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks4"},
-    {"name": "proxyscrape_socks5", "url": "https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks5"},
+    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http",
+    "https://www.proxy-list.download/api/v1/get?type=http",          # Анонимные + прозрачные
     
     # ProxyListDownload (API)
     {"name": "proxy-list-download", "types": ["HTTP", "SOCKS4", "SOCKS5"]},
@@ -160,16 +159,24 @@ def scrape_free_proxy_sources():
 
 def check_proxy(proxy_str):
     """
-    ✅ УЛУЧШЕННАЯ проверка одного IP:PORT.
-    Теперь быстрее и эффективнее находит рабочие узлы.
+    ✅ УЛУЧШЕННАЯ проверка одного IP:PORT или protocol://IP:PORT.
+    Теперь корректно работает с любыми входными данными.
     """
-    
-    if ':' not in proxy_str:
+
+    # 🔹 Шаг 1: Приводим строку к единому формату IP:PORT
+    # Это решает проблему дублирования протоколов ("http://http://")
+    if proxy_str.startswith("http://") or proxy_str.startswith("https://"):
+        # Если уже есть протокол, просто вырезаем всё после двоеточия
+        ip_port = proxy_str.split("//")[1].split(":")
+    else:
+        # Иначе предполагаем, что это голая пара IP:PORT
+        ip_port = proxy_str.strip().split(":")
+
+    # Базовая валидность
+    if len(ip_port) != 2 or not PROXY_PATTERN.match(f"{ip_port[0]}:{ip_port[1]}"):  
         return None  # Не валидный формат
 
-    # Мы проверяем ТОЛЬКО строку вида IP:PORT, чтобы избежать ошибок разбиения
-    # Если там уже есть протокол (например, http://), он будет удалён ниже
-    ip_port = proxy_str.strip()
+    ip, port = ip_port
 
     # 🔥 Оставляем ТОЛЬКО HTTP(S). SOCKS часто работает нестабильно.
     protocols_to_check = ['http']
@@ -179,7 +186,7 @@ def check_proxy(proxy_str):
     for protocol in protocols_to_check:
         session = requests.Session()
         
-        full_proxy_url = f"{protocol}://{ip_port}"  # Собираем полную ссылку здесь
+        full_proxy_url = f"{protocol}://{ip}:{port}"  # Собираем полную ссылку здесь
         proxies = {
             "http": full_proxy_url,
             "https": full_proxy_url
@@ -198,14 +205,19 @@ def check_proxy(proxy_str):
         #######################################################################
         try:
             # Получаем свой реальный внешний IP без прокси
-            real_ip_resp = requests.get("https://ifconfig.me/all.json", timeout=(PING_TIMEOUT_CONNECT, PING_TIMEOUT_READ))
+            real_ip_resp = requests.get(
+                "https://ifconfig.me/all.json",
+                timeout=(PING_TIMEOUT_CONNECT, PING_TIMEOUT_READ),
+                verify=False  # ❇️ Добавлено для обхода SSL-ошибок некоторых сайтов
+            )
             real_ip_data = real_ip_resp.json()
             real_ip = real_ip_data.get("ip_addr")
 
             # То же самое, но через прокси
             response = session.get(
                 "https://httpbin.org/ip",
-                timeout=(PING_TIMEOUT_CONNECT, PING_TIMEOUT_READ)
+                timeout=(PING_TIMEOUT_CONNECT, PING_TIMEOUT_READ),
+                verify=False  # ❇️ Добавлено для обхода SSL-ошибок некоторых сайтов
             )
             
             data = response.json()
@@ -216,7 +228,7 @@ def check_proxy(proxy_str):
             if (
                 response.status_code != 200 or 
                 not isinstance(origin, str) or 
-                ip_port.split(':')[0] not in origin or  # Проверяем только IP, а не порт
+                ip not in origin or 
                 real_ip in origin
             ):
                 print(f"[FAIL] {full_proxy_url} - Invalid ping result.")
@@ -236,7 +248,9 @@ def check_proxy(proxy_str):
             response = session.get(
                 "https://listen7.myradio24.com/iridium", 
                 stream=True, 
-                timeout=(PING_TIMEOUT_CONNECT, PING_TIMEOUT_READ))  
+                timeout=(STREAM_TIMEOUT_CONNECT, STREAM_TIMEOUT_READ),  # Увеличено время чтения стрима
+                verify=False  # ❇️ Добавлено для обхода SSL-ошибок некоторых сайтов
+            )  
             
             start_time = get_current_time()
             data_chunk = response.raw.read(4096)  # Меньше данных для быстрой диагностики
@@ -268,7 +282,6 @@ def check_proxy(proxy_str):
     # Возвращаем ВСЕ рабочие варианты для этого IP
     return results
 
-
 if __name__ == "__main__":
     MAX_WORK_TIME_MINUTES = 25
     TARGET_PROXY_COUNT_BASE = 10  # Я снизил базовое число до 10 для начала
@@ -280,8 +293,8 @@ if __name__ == "__main__":
         with open("working_proxies.txt", "r") as file:
             # Строгий разбор каждой строки старого файла
             for line in file:
-                parts = line.strip().split('|')
-                url = parts[0].strip()  # Берём только URL
+                parts = line.strip().split('|')[:1]  # Берём только первую часть (URL)
+                url = parts[0].strip()
 
                 # Извлекаем чистый IP:PORT для дальнейшей работы
                 _, address = url.split('://')[:2]
@@ -363,3 +376,13 @@ if __name__ == "__main__":
         # Больше не сохраняем Latency и Speed, они нам сейчас не нужны
         for item in final_list:
             file.write(item['url'] + "\n")
+
+    # ❇️ Выводим первые несколько узлов прямо в логи GitHub Actions
+    print(f"\n[INFO] Found {len(final_list)} working proxies:")
+    for i, node in enumerate(final_list[:5]):
+        print(f"Proxy #{i+1}: {node['url']} (Speed ~{int(node.get('speed_kbps', 0))} KB/s)")
+
+
+
+
+
