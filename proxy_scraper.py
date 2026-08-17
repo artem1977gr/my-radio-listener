@@ -4,20 +4,32 @@ import datetime
 import os  # Для переименования файла под workflow
 import random
 import json
-import re  # <--- Добавлено для регулярных выражений
+import re
 from bs4 import BeautifulSoup
 
 
 # ⚡️ НАИБОЛЕЕ ПОЛНЫЙ СПИСОК ИСТОЧНИКОВ БЕСПЛАТНЫХ HTTP-ПРОКСИ
 sources = [
-    # ✅ API-сервисы
-    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000",
-    "https://www.proxy-list.download/api/v1/get?type=http",          # Анонимные + прозрачные
-    "https://raw.githubusercontent.com/roosterkid/openproxylists/master/MIXED_ANON_HTTP.txt",
-    "https://api.openproxylist.xyz/http.txt",
+    {"name": "proxyscrape_http", "url": "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http"},
+    {"name": "proxyscrape_socks4", "url": "https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks4"},
+    {"name": "proxyscrape_socks5", "url": "https://api.proxyscrape.com/v2/?request=getproxies&protocol=socks5"},
     
-    # ✅ Веб-сайты для парсинга (будут собираться через наш модуль)
-    "PARSE_FREE_PROXY_SOURCES"
+    # ProxyListDownload (API)
+    {"name": "proxy-list-download", "types": ["HTTP", "SOCKS4", "SOCKS5"]},
+    
+    # Веб-сайты для парсинга HTML
+    {
+        "free-proxy-list": [
+            "https://free-proxy-list.net/",
+            "https://free-proxy-list.net/us-index.html",
+            "https://free-proxy-list.net/uk-proxy.html",
+            "https://free-proxy-list.net/anonymous-proxy.html"
+        ],
+        "ssl-proxies": "https://www.sslproxies.org/",  # Похожий формат таблицы
+        "hidemy.name": "https://hide-my.ip/ru/proxy-list/?country=&type=shtt&anonymity=34&start=0#list",
+        "cool-proxy": "https://www.cool-proxy.net/proxies/http_proxy_list/c country=a&port=&anonymity=&google=on&ping=under300&spam=on&sort=ping",
+        "geonode": "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc&filter=type%3Dhttp"
+    },
 ]
 
 # Настройки адаптивных таймаутов
@@ -51,32 +63,13 @@ def load_proxies_from_source(raw_text):
     return valid_proxies
 
 ###############################################################################
-# МОДУЛЬ ДЛЯ СБОРА ПРОКСИ СО ВСЕХ ПОПУЛЯРНЫХ ВЕБ-САЙТОВ
+# МОДУЛЬ ДЛЯ СБОРА ПРОКСИ СО ВСЕХ ПОПУЛЯРНЫХ ВЕБ-САЙТОВ И API
 ###############################################################################
 def scrape_free_proxy_sources():
     """
-    Парсит десятки популярных сайтов с бесплатными прокси.
-    Возвращает список валидных строк вида "http://ip:port".
+    Парсит десятки популярных источников бесплатных HTTP(S)/SOCKS-прокси.
+    Возвращает список валидных строк вида "protocol://ip:port".
     """
-    urls = {
-        "free-proxy-list": "https://free-proxy-list.net/",
-        "us-proxies": "https://free-proxy-list.net/us-index.html",
-        "uk-proxies": "https://free-proxy-list.net/uk-proxy.html",
-        "anonymous-proxies": "https://free-proxy-list.net/anonymous-proxy.html",
-        "ssl-proxies": "https://www.sslproxies.org/",
-        
-        # ProxyListDownload
-        "proxy-list-download": ["HTTP", "SOCKS4", "SOCKS5"],
-        
-        # SpysOne
-        "spys-one": ["all", "anon"],  # all / anon / transparent
-        
-        # Other sources
-        "hidemy.name": "https://hide-my.ip/ru/proxy-list/?country=&type=shtt&anonymity=34&start=0#list",
-        "cool-proxy": "https://www.cool-proxy.net/proxies/http_proxy_list/c country=a&port=&anonymity=&google=on&ping=under300&spam=on&sort=ping",
-        "geonode": "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc&filter=type%3Dhttp"
-    }
-
     proxies = set()  # Множество для удаления дублей
 
     headers = {
@@ -84,12 +77,14 @@ def scrape_free_proxy_sources():
         "Accept-Language": "en-US,en;q=0.9"
     }
 
-    def parse_table(soup, selector="table"):
+    def parse_table(soup, selector="table.table-bordered"):
         table = soup.find(selector)
         rows = table.tbody.find_all("tr") if table else []
 
         for row in rows:
             cells = [td.text.strip() for td in row.find_all("td")]
+            
+            # Обработка разных форматов таблиц
             ip = cells[0].strip()
             port = cells[1].strip()
             protocol = cells[6].lower().strip() if len(cells) > 6 else ""
@@ -100,56 +95,267 @@ def scrape_free_proxy_sources():
             elif protocol == "no":
                 proxy_str = f"http://{ip}:{port}"
             else:
-                continue
-
-            proxies.add(proxy_str)
-
-    print("[INFO] Scraping free proxy websites...")
-    for source, url_or_config in urls.items():
+                # Для других сайтов протокол может быть в другом месте
+                proto_cell = next((c for c in cells if 'http' in c.lower()), "")
+                protocols = re.findall(r'(http|https|socks4|socks5)', proto_cell)
+                
+                # Добавляем все возможные варианты из одной строки
+                for proto in protocols:
+                    proxy_str = f"{proto}://{ip}:{port}"
+                    proxies.add(proxy_str)
+    
+    print("[INFO] Scraping free proxy websites and APIs...")
+    for source_config in sources:
         try:
-            if source.startswith("proxy-list-download"):
-                # Специальная обработка для proxy-list.download
-                base_url = "https://www.proxy-list.download/"
-                for proto in url_or_config:
-                    response = requests.get(f"{base_url}/api/v1/get?type={proto}", timeout=10)
-                    new_proxies = load_proxies_from_source(response.text)
-                    proxies.update(new_proxies)
-                continue
+            name = list(source_config.keys())[0]
+            url_or_config = source_config[name]
 
-            if source == "spys-one":
-                # Special handling for spys.one due to its complex structure
-                for page_type in url_or_config:
-                    url = f"https://spys.one/en/{page_type}proxy/"
-                    response = requests.get(url, headers=headers, timeout=10)
+            if isinstance(url_or_config, dict):  # Это наши специальные конфигурации
+                config = url_or_config["types"]
+
+                if name == "proxy-list-download":  # Спец-обработка API
+                    base_url = "https://www.proxy-list.download/"
+                    for proto in config:
+                        api_url = f"{base_url}/api/v1/get?type={proto}"
+                        response = requests.get(api_url, timeout=10)
+                        new_proxies = load_proxies_from_source(response.text)
+                        proxies.update(new_proxies)
+                    continue
+
+                raise ValueError(f"Unknown special source type: {name}")
+
+            elif isinstance(url_or_config, list):  # Список страниц
+                for page_url in url_or_config:
+                    response = requests.get(page_url, headers=headers, timeout=10)
                     soup = BeautifulSoup(response.text, 'html.parser')
                     
-                    # На spys.one таблица скрыта в JavaScript, но есть текстовый блок
-                    data_rows = soup.select_one("#xpproxytext").get_text(separator='\n').split('\n')
-                    for row in data_rows:
-                        parts = row.split(':')
-                        if len(parts) >= 2:
-                            ip_port = f"{parts[0]}:{parts[1]}"
-                            proxies.add(ip_port)
-                continue
-
-            if isinstance(url_or_config, list):
-                raise ValueError("Invalid URL configuration")
-
-            # Обработка остальных сайтов как обычных страниц
-            response = requests.get(url_or_config, headers=headers, timeout=10)
-            soup = BeautifulSoup(response.text, 'html.parser')
-
-            # Разные сайты используют разные селекторы таблиц
-            selectors = ["table.table-bordered", "#proxy-table", ".table"]
-            for sel in selectors:
-                parse_table(soup, sel)
+                    # Разные сайты используют разные селекторы таблиц
+                    selectors = ["table.table-bordered", "#proxy-table", ".table"]
+                    for sel in selectors:
+                        parse_table(soup, sel)
+            else:  # Обычная страница
+                response = requests.get(url_or_config, headers=headers, timeout=10)
+                soup = BeautifulSoup(response.text, 'html.parser')
+                parse_table(soup)
 
         except Exception as e:
-            print(f"[WARNING] Failed to parse {source}: {e}")
+            print(f"[WARNING] Failed to parse {name}: {e}")
     
     # Геонод возвращает JSON
-    geonode_response = requests.get(urls["geonode"], headers=headers).json()
+    geonode_response = requests.get(
+        "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc&filter=type%3Dhttp",
+        headers=headers,
+        timeout=10
+    ).json()
     for entry in geonode_response.get("data", []):
         proxies.add(f"http://{entry['ip']}:{entry['port']}")
 
     return list(proxies)
+
+def check_proxy(proxy_str):
+    """
+    ✅ УЛУЧШЕННАЯ проверка одного IP:PORT.
+    Теперь быстрее и эффективнее находит рабочие узлы.
+    """
+    
+    if ':' not in proxy_str:
+        return None  # Не валидный формат
+
+    ip, port = proxy_str.split(':')
+
+    # 🔥 Оставляем ТОЛЬКО HTTP(S). SOCKS часто работает нестабильно.
+    protocols_to_check = ['http']
+
+    results = []
+
+    for protocol in protocols_to_check:
+        session = requests.Session()
+        
+        full_proxy_url = f"{protocol}://{proxy_str}"
+        proxies = {
+            "http": full_proxy_url,
+            "https": full_proxy_url
+        }
+
+        adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=50)
+        session.mount('http://', adapter)
+        session.mount('https://', adapter)
+
+        # Адаптивный User-Agent для пинга
+        session.headers.update({'User-Agent': random.choice(user_agents)})
+
+        #######################################################################
+        # Этап 1: БЫСТРАЯ ПРОВЕРКА ЧЕРЕЗ httpbin.org (PING)
+        # Мы сначала проверяем базовую доступность и анонимность.
+        #######################################################################
+        try:
+            # Получаем свой реальный внешний IP без прокси
+            real_ip_resp = requests.get("https://ifconfig.me/all.json", timeout=(PING_TIMEOUT_CONNECT, PING_TIMEOUT_READ))
+            real_ip_data = real_ip_resp.json()
+            real_ip = real_ip_data.get("ip_addr")
+
+            # То же самое, но через прокси
+            response = session.get(
+                "https://httpbin.org/ip",
+                timeout=(PING_TIMEOUT_CONNECT, PING_TIMEOUT_READ)
+            )
+            
+            data = response.json()
+            origin = data.get('origin')
+
+            # Метрика успеха №1: Статус-код 200 AND есть тело ответа
+            # И наш реальный IP должен отличаться от того, что видит сервер!
+            if (
+                response.status_code != 200 or 
+                not isinstance(origin, str) or 
+                ip not in origin or 
+                real_ip in origin
+            ):
+                print(f"[FAIL] {full_proxy_url} - Invalid ping result.")
+                continue  # Следующий протокол
+
+        except Exception as e:
+            print(f"[FAIL] {full_proxy_url} - Ping error:", str(e))
+            continue
+
+        #######################################################################
+        # Этап 2: БЫСТРАЯ ПРОВЕРКА ДОСТУПНОСТИ СТРИМА
+        # Читаем всего 4 КБ данных за 5 секунд.
+        # Это позволяет быстро отсечь мёртвые узлы.
+        #######################################################################
+        try:
+            # Здесь можно указать любой твой поток или сайт для проверки
+            response = session.get(
+                "https://listen7.myradio24.com/iridium", 
+                stream=True, 
+                timeout=(PING_TIMEOUT_CONNECT, PING_TIMEOUT_READ))  
+            
+            start_time = get_current_time()
+            data_chunk = response.raw.read(4096)  # Меньше данных для быстрой диагностики
+            end_time = get_current_time()
+
+            # Метрика успеха №1: Получено минимум 1 Кбайт данных
+            if not data_chunk or len(data_chunk) < 1024:
+                print(f"[FAIL] {full_proxy_url} - Audio stream failed")
+                continue  # Следующий протокол
+
+            elapsed_seconds = end_time - start_time
+            speed_kbps = len(data_chunk) / elapsed_seconds / 1024  # KB/s
+
+            # 🔥 Понижаем планку скорости до 10 KB/s.
+            # Для потокового аудио это критично важно!
+            if speed_kbps < 10:
+                print(f"[FAIL] {full_proxy_url} - Speed too low ({speed_kbps:.2f} KB/s)")
+                continue
+
+            latency = round((end_time - start_time) * 1000, 2)
+
+            # Просто возвращаем URL рабочей прокси
+            result = {'url': full_proxy_url}
+            results.append(result)
+
+        except Exception as e:
+            print(f"[FAIL] {full_proxy_url} - Stream test error:", str(e))
+
+    # Возвращаем ВСЕ рабочие варианты для этого IP
+    return results
+
+
+if __name__ == "__main__":
+    MAX_WORK_TIME_MINUTES = 25
+    TARGET_PROXY_COUNT_BASE = 10  # Я снизил базовое число до 10 для начала
+    RESERVE_PERCENTAGE = 0.2  # Запас 20%
+
+    # Загружаем старый файл с предыдущими рабочими прокси
+    old_proxies_dict = {}
+    try:
+        with open("working_proxies.txt", "r") as file:
+            # Строгий разбор каждой строки старого файла
+            for line in file:
+                parts = line.strip().split('|')
+                url = parts[0].strip()  # Берём только URL
+                
+                _, address = url.split('://')[:2]
+                # Проверка регуляркой: должен соответствовать формату IPv4:Port
+                if not PROXY_PATTERN.match(address):
+                    raise ValueError(f"Invalid format: {address}")
+
+                ip_port = address.split(':')
+                # Разбиваем на IP и PORT
+                if len(ip_port) != 2 or not ip_port[1].isdigit():
+                    raise ValueError(f"Invalid format: {url}")
+
+                ip, _port = ip_port
+                ports = old_proxies_dict.setdefault(ip, {})
+                ports[url] = True  # Просто помечаем URL как ранее найденный
+    
+        print("[INFO] Previous proxy list loaded.")
+    except FileNotFoundError:
+        pass
+
+    # Сначала проверяем старые прокси
+    print("\n[INFO] Checking previous working proxies...")
+    found_old_proxies = []
+    for ip, urls in old_proxies_dict.items():
+        for url in urls:
+            # Мы уже знаем полный URL, так что сразу передаём его целиком
+            results = check_proxy(url.replace('http://', '').replace('socks5h://', ''))
+            if results:
+                found_old_proxies.extend(results)
+
+    # Теперь проверяем новые источники
+    print("\n[INFO] Fetching new proxies to reach target count...")
+    start_script_time = datetime.datetime.now()
+
+    # Пробуем сначала загрузить из кэша
+    all_proxies = []
+
+    # Если нет кэша или он устарел — загружаем заново
+    if not all_proxies:
+        # Вместо загрузки из API собираем данные с веб-сайтов
+        print("\n[INFO] Fetching new proxies from web sources...")
+        all_proxies = scrape_free_proxy_sources()
+
+        # Фильтруем мусор при помощи нашей функции
+        valid_lines = load_proxies_from_source("\n".join(all_proxies))
+
+        if len(valid_lines) == 0:
+            print("[WARNING] No valid proxies found on any source.")
+        else:
+            all_proxies = valid_lines
+
+    # Проверяем новые адреса
+    found_new_proxies = []
+    for proxy in all_proxies:
+        # Проверка лимита времени
+        elapsed_minutes = (datetime.datetime.now() - start_script_time).total_seconds() / 60
+        if elapsed_minutes >= MAX_WORK_TIME_MINUTES:
+            break
+
+        sleep(0.1)
+        results = check_proxy(proxy.strip())
+        if results:
+            found_new_proxies.extend(results)
+
+    # Объединение результатов
+    total_target_count = int(TARGET_PROXY_COUNT_BASE * (1 + RESERVE_PERCENTAGE))
+
+    unique_results = {}  # {IP: {port1, port2}} -> чтобы не было дублей
+    for item in found_old_proxies + found_new_proxies:
+        ip = item['url'].split('//')[1].split(':')[0]
+        ports = unique_results.setdefault(ip, {})
+        ports[item['url']] = item
+
+    sorted_items = sorted([v for p in unique_results.values() for v in p.values()],
+                          key=lambda x: x['url'])  # Сортируем просто по URL
+
+    final_list = sorted_items[:total_target_count]
+
+    # Сохраняем основной рабочий файл
+    with open("working_proxies.txt", "w") as file:
+        # Формат: Только чистый URL
+        # Больше не сохраняем Latency и Speed, они нам сейчас не нужны
+        for item in final_list:
+            file.write(item['url'] + "\n")
+
+
