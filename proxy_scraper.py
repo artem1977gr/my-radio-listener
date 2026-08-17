@@ -83,7 +83,6 @@ def scrape_free_proxy_sources():
         for row in rows:
             cells = [td.text.strip() for td in row.find_all("td")]
             
-            # Обработка разных форматов таблиц
             ip = cells[0].strip()
             port = cells[1].strip()
             protocol = cells[6].lower().strip() if len(cells) > 6 else ""
@@ -94,7 +93,6 @@ def scrape_free_proxy_sources():
             elif protocol == "no":
                 proxy_str = f"http://{ip}:{port}"
             else:
-                # Для других сайтов протокол может быть в другом месте
                 proto_cell = next((c for c in cells if 'http' in c.lower()), "")
                 protocols = re.findall(r'(http|https|socks4|socks5)', proto_cell)
                 
@@ -104,58 +102,74 @@ def scrape_free_proxy_sources():
                     proxies.add(proxy_str)
     
     print("[INFO] Scraping free proxy websites and APIs...")
+
+    # ❇️ ОБРАЩАЕМ ВНИМАНИЕ НА ЭТОТ БЛОК!
+    # Теперь каждое обращение к источнику защищено от ошибок.
     for source_config in sources:
         try:
             name = list(source_config.keys())[0] if isinstance(source_config, dict) else None
             url_or_config = source_config[name] if isinstance(source_config, dict) else source_config
 
-            if isinstance(url_or_config, str):  # Простой URL
-                response = requests.get(url_or_config, timeout=10)
+            # Обработка простых URL
+            if isinstance(url_or_config, str):
+                response = requests.get(
+                    url_or_config,
+                    timeout=(PING_TIMEOUT_CONNECT, PING_TIMEOUT_READ),  # Используем те же таймауты
+                    verify=False  # ❇️ Добавлено для обхода SSL-ошибок некоторых сайтов
+                )
                 new_proxies = load_proxies_from_source(response.text)
                 proxies.update(new_proxies)
                 continue
 
-            if isinstance(url_or_config, dict):  # Спец-обработка API
+            # Спец-обработка API ProxyListDownload
+            if isinstance(url_or_config, dict):  
                 config = url_or_config["types"]
 
                 if name == "proxy-list-download":  
                     base_url = "https://www.proxy-list.download/"
                     for proto in config:
                         api_url = f"{base_url}/api/v1/get?type={proto}"
-                        response = requests.get(api_url, timeout=10)
+                        response = requests.get(api_url, timeout=10, verify=False)
                         new_proxies = load_proxies_from_source(response.text)
                         proxies.update(new_proxies)
                     continue
 
                 raise ValueError(f"Unknown special source type: {name}")
 
-            elif isinstance(url_or_config, list):  # Список страниц
+            # Список страниц (HTML-парсер)
+            elif isinstance(url_or_config, list):  
                 for page_url in url_or_config:
-                    response = requests.get(page_url, headers=headers, timeout=10)
+                    response = requests.get(page_url, headers=headers, timeout=10, verify=False)
                     soup = BeautifulSoup(response.text, 'html.parser')
                     
-                    # Разные сайты используют разные селекторы таблиц
                     selectors = ["table.table-bordered", "#proxy-table", ".table"]
                     for sel in selectors:
                         parse_table(soup, sel)
-            else:  # Обычная страница
-                response = requests.get(url_or_config, headers=headers, timeout=10)
+            # Обычная страница
+            else:  
+                response = requests.get(url_or_config, headers=headers, timeout=10, verify=False)
                 soup = BeautifulSoup(response.text, 'html.parser')
                 parse_table(soup)
 
         except Exception as e:
-            print(f"[WARNING] Failed to parse {name or source_config}: {e}")
+            # ❇️ Вместо простого предупреждения теперь выводим имя сайта и тип ошибки.
+            print(f"[WARNING] Failed to fetch from '{name or url_or_config}' ({e.__class__.__name__}): {str(e)}")
     
-    # Геонод возвращает JSON
-    geonode_response = requests.get(
-        "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc&filter=type%3Dhttp",
-        headers=headers,
-        timeout=10
-    ).json()
-    for entry in geonode_response.get("data", []):
-        proxies.add(f"http://{entry['ip']}:{entry['port']}")
+    # Геонод возвращает JSON. Защищаем этот вызов отдельным блоком.
+    try:
+        geonode_response = requests.get(
+            "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc&filter=type%3Dhttp",
+            headers=headers,
+            timeout=(PING_TIMEOUT_CONNECT, STREAM_TIMEOUT_READ),
+            verify=False
+        ).json()
+        for entry in geonode_response.get("data", []):
+            proxies.add(f"http://{entry['ip']}:{entry['port']}")
+    except Exception as e:
+        print(f"[WARNING] Failed to fetch from Geonode ({e.__class__.__name__}): {str(e)}")
 
     return list(proxies)
+
 
 def check_proxy(proxy_str):
     """
@@ -164,7 +178,7 @@ def check_proxy(proxy_str):
     """
 
     # 🔹 Шаг 1: Приводим строку к единому формату IP:PORT
-    # Это решает проблему дублирования протоколов ("http://http://")
+    # Это решает проблему дублирования протоколов ("http://http://").
     if proxy_str.startswith("http://") or proxy_str.startswith("https://"):
         # Если уже есть протокол, просто вырезаем всё после двоеточия
         ip_port = proxy_str.split("//")[1].split(":")
@@ -282,6 +296,7 @@ def check_proxy(proxy_str):
     # Возвращаем ВСЕ рабочие варианты для этого IP
     return results
 
+
 if __name__ == "__main__":
     MAX_WORK_TIME_MINUTES = 25
     TARGET_PROXY_COUNT_BASE = 10  # Я снизил базовое число до 10 для начала
@@ -381,8 +396,3 @@ if __name__ == "__main__":
     print(f"\n[INFO] Found {len(final_list)} working proxies:")
     for i, node in enumerate(final_list[:5]):
         print(f"Proxy #{i+1}: {node['url']} (Speed ~{int(node.get('speed_kbps', 0))} KB/s)")
-
-
-
-
-
