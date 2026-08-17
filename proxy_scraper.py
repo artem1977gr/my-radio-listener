@@ -107,13 +107,19 @@ def scrape_free_proxy_sources():
     print("[INFO] Scraping free proxy websites and APIs...")
     for source_config in sources:
         try:
-            name = list(source_config.keys())[0]
-            url_or_config = source_config[name]
+            name = list(source_config.keys())[0] if isinstance(source_config, dict) else None
+            url_or_config = source_config[name] if isinstance(source_config, dict) else source_config
 
-            if isinstance(url_or_config, dict):  # Это наши специальные конфигурации
+            if isinstance(url_or_config, str):  # Простой URL
+                response = requests.get(url_or_config, timeout=10)
+                new_proxies = load_proxies_from_source(response.text)
+                proxies.update(new_proxies)
+                continue
+
+            if isinstance(url_or_config, dict):  # Спец-обработка API
                 config = url_or_config["types"]
 
-                if name == "proxy-list-download":  # Спец-обработка API
+                if name == "proxy-list-download":  
                     base_url = "https://www.proxy-list.download/"
                     for proto in config:
                         api_url = f"{base_url}/api/v1/get?type={proto}"
@@ -139,7 +145,7 @@ def scrape_free_proxy_sources():
                 parse_table(soup)
 
         except Exception as e:
-            print(f"[WARNING] Failed to parse {name}: {e}")
+            print(f"[WARNING] Failed to parse {name or source_config}: {e}")
     
     # Геонод возвращает JSON
     geonode_response = requests.get(
@@ -161,7 +167,9 @@ def check_proxy(proxy_str):
     if ':' not in proxy_str:
         return None  # Не валидный формат
 
-    ip, port = proxy_str.split(':')
+    # Мы проверяем ТОЛЬКО строку вида IP:PORT, чтобы избежать ошибок разбиения
+    # Если там уже есть протокол (например, http://), он будет удалён ниже
+    ip_port = proxy_str.strip()
 
     # 🔥 Оставляем ТОЛЬКО HTTP(S). SOCKS часто работает нестабильно.
     protocols_to_check = ['http']
@@ -171,7 +179,7 @@ def check_proxy(proxy_str):
     for protocol in protocols_to_check:
         session = requests.Session()
         
-        full_proxy_url = f"{protocol}://{proxy_str}"
+        full_proxy_url = f"{protocol}://{ip_port}"  # Собираем полную ссылку здесь
         proxies = {
             "http": full_proxy_url,
             "https": full_proxy_url
@@ -208,7 +216,7 @@ def check_proxy(proxy_str):
             if (
                 response.status_code != 200 or 
                 not isinstance(origin, str) or 
-                ip not in origin or 
+                ip_port.split(':')[0] not in origin or  # Проверяем только IP, а не порт
                 real_ip in origin
             ):
                 print(f"[FAIL] {full_proxy_url} - Invalid ping result.")
@@ -274,14 +282,12 @@ if __name__ == "__main__":
             for line in file:
                 parts = line.strip().split('|')
                 url = parts[0].strip()  # Берём только URL
-                
-                _, address = url.split('://')[:2]
-                # Проверка регуляркой: должен соответствовать формату IPv4:Port
-                if not PROXY_PATTERN.match(address):
-                    raise ValueError(f"Invalid format: {address}")
 
+                # Извлекаем чистый IP:PORT для дальнейшей работы
+                _, address = url.split('://')[:2]
                 ip_port = address.split(':')
-                # Разбиваем на IP и PORT
+
+                # Проверки формата
                 if len(ip_port) != 2 or not ip_port[1].isdigit():
                     raise ValueError(f"Invalid format: {url}")
 
@@ -298,7 +304,7 @@ if __name__ == "__main__":
     found_old_proxies = []
     for ip, urls in old_proxies_dict.items():
         for url in urls:
-            # Мы уже знаем полный URL, так что сразу передаём его целиком
+            # Передаём чистую пару IP:PORT
             results = check_proxy(url.replace('http://', '').replace('socks5h://', ''))
             if results:
                 found_old_proxies.extend(results)
@@ -333,7 +339,7 @@ if __name__ == "__main__":
             break
 
         sleep(0.1)
-        results = check_proxy(proxy.strip())
+        results = check_proxy(proxy)
         if results:
             found_new_proxies.extend(results)
 
@@ -357,5 +363,3 @@ if __name__ == "__main__":
         # Больше не сохраняем Latency и Speed, они нам сейчас не нужны
         for item in final_list:
             file.write(item['url'] + "\n")
-
-
