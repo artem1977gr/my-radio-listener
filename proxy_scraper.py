@@ -4,7 +4,7 @@ import datetime
 import os  # Для переименования файла под workflow
 import random
 import json
-import re  # Добавлено для регулярных выражений
+import re  # <--- Добавлено для регулярных выражений
 
 
 # ⚡️ НАИБОЛЕЕ НАДЁЖНЫЕ ИСТОЧНИКИ + дополнительные HTTP(S)
@@ -82,7 +82,7 @@ def check_proxy(proxy_str):
         try:
             # Этап 1: Быстрый пинг через https://httpbin.org/ip
             response = session.get("https://httpbin.org/ip", timeout=(PING_TIMEOUT_CONNECT, PING_TIMEOUT_READ))
-
+            
             ### Защита от любых серверных ошибок ###
             # Если сервер вернул код >= 400 (любая ошибка), мы просто пропускаем этот адрес.
             # Это защитит нас от падений на HTML-страницах ошибок типа 502 Bad Gateway.
@@ -94,7 +94,7 @@ def check_proxy(proxy_str):
             data = response.json()  # Здесь больше не будет ValueError!
             origin = data.get('origin')
 
-            # Проверяем, что это именно наш IP, а не заглушка провайдера
+            # Проверяем, что это именно наш IP, а не заглушка провайдера или HTML-код ошибки
             if response.status_code != 200 or not isinstance(origin, str) or ip not in origin:
                 continue  # Следующий протокол
 
@@ -105,6 +105,7 @@ def check_proxy(proxy_str):
                 continue
 
             # Этап 2: Тест нашего конкретного аудио-потока
+            # Здесь меняем User-Agent на плеер
             session.headers.update({
                 'User-Agent': 'VLC/3.0.16 LibVLC/3.0.16'  # Пример реального плеера
             })
@@ -159,23 +160,30 @@ if __name__ == "__main__":
     old_proxies_dict = {}
     try:
         with open("working_proxies.txt", "r") as file:
-            # Строгий разбор каждой строки старого файла
+            # ✅ ДВОЙНАЯ ЗАЩИТА ОТ МУСОРА В СТАРОМ ФАЙЛЕ
             for line in file:
                 parts = line.strip().split('|')
-                url = parts[0].strip()
                 
+                # Первая колонка должна быть URL вида http(s)/socks5h://IP:PORT
+                url = parts[0].strip()
+
                 # Извлекаем чистый IP:PORT
                 _, address = url.split('://')[:2]
+
+                # Проверка регуляркой: должен соответствовать формату IPv4:Port
+                if not PROXY_PATTERN.match(address):
+                    raise ValueError(f"Invalid format: {address}")
+
+                # Разбиваем на IP и PORT
                 ip_port = address.split(':')
 
                 # Проверка: должен быть ровно два элемента (IP и PORT), и порт — число
                 if len(ip_port) != 2 or not ip_port[1].isdigit():
-                    print(f"[WARNING] Skipping invalid previous proxy '{line.strip()}': Invalid format")
-                    continue
+                    raise ValueError(f"Invalid format: {url}")
 
                 ip, _port = ip_port
                 ports = old_proxies_dict.setdefault(ip, {})
-                ports[url] = True  # Просто помечаем URL как ранее найденный
+                ports[url] = True  # Просто помечаем этот URL как ранее найденный
     
         print("[INFO] Previous proxy list loaded.")
     except FileNotFoundError:
@@ -214,6 +222,7 @@ if __name__ == "__main__":
             try:
                 resp = requests.get(source, timeout=10)
                 
+                # ✅ Защита от невалидных данных прямо здесь!
                 # Фильтруем строки ДО добавления их в общий массив.
                 # Это гарантирует, что в all_proxies никогда не попадёт мусор.
                 valid_lines = load_proxies_from_source(resp.text)
