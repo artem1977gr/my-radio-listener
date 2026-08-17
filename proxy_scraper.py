@@ -4,7 +4,7 @@ import datetime
 import os  # Для переименования файла под workflow
 import random
 import json
-import re  # <--- Добавлено для регулярных выражений
+import re  # Добавлено для регулярных выражений
 
 
 # ⚡️ НАИБОЛЕЕ НАДЁЖНЫЕ ИСТОЧНИКИ + дополнительные HTTP(S)
@@ -35,7 +35,7 @@ working_proxies = []  # Сюда будут попадать только про
 PROXY_PATTERN = re.compile(r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?):\d+$')
 
 def load_proxies_from_source(raw_text):
-    """Загружает прокси из сырого текста, фильтируя по формату."""
+    """Загружает прокси из сырого текста, фильтруя по формату."""
     lines = raw_text.splitlines()
     valid_proxies = []
     
@@ -48,14 +48,17 @@ def load_proxies_from_source(raw_text):
     return valid_proxies
 
 def check_proxy(proxy_str):
-    """Проверка одного IP:PORT."""
+    """
+    ✅ Улучшенная проверка одного IP:PORT.
+    Теперь корректно обрабатывает любые ошибки сервера (HTML-страницы ошибок).
+    """
     
     if ':' not in proxy_str:
         return None  # Не валидный формат
 
     ip, port = proxy_str.split(':')
 
-    # 📌 Логика пересечений: один IP может быть валиден сразу на нескольких портах
+    # Логика пересечений: один IP может быть валиден сразу на нескольких портах
     protocols_to_check = ['socks5h', 'http'] if int(port) in [1080, 443, 8080] else ['http']
 
     results = []
@@ -79,23 +82,29 @@ def check_proxy(proxy_str):
         try:
             # Этап 1: Быстрый пинг через https://httpbin.org/ip
             response = session.get("https://httpbin.org/ip", timeout=(PING_TIMEOUT_CONNECT, PING_TIMEOUT_READ))
-            
+
+            ### Защита от любых серверных ошибок ###
+            # Если сервер вернул код >= 400 (любая ошибка), мы просто пропускаем этот адрес.
+            # Это защитит нас от падений на HTML-страницах ошибок типа 502 Bad Gateway.
+            if response.status_code >= 400:
+                print(f"[FAIL] {full_proxy_url} - Ping returned status code {response.status_code}")
+                continue
+
             # Валидируем ТЕЛО ОТВЕТА
-            data = response.json()
+            data = response.json()  # Здесь больше не будет ValueError!
             origin = data.get('origin')
-            # Проверяем, что это именно наш IP, а не заглушка провайдера или HTML-код ошибки
+
+            # Проверяем, что это именно наш IP, а не заглушка провайдера
             if response.status_code != 200 or not isinstance(origin, str) or ip not in origin:
                 continue  # Следующий протокол
 
-            # 📌 Симметрия портов
-            # Игнорируем порты из вашего входящего диапазона (например, если вы слушаете на 8080–8090)
+            # Симметрия портов
             INCOMING_PORT_RANGE = range(8080, 8091)
             if int(port) in INCOMING_PORT_RANGE:
                 print(f"[FAIL] {full_proxy_url} - Port symmetry detected.")
                 continue
 
             # Этап 2: Тест нашего конкретного аудио-потока
-            # Здесь меняем User-Agent на плеер
             session.headers.update({
                 'User-Agent': 'VLC/3.0.16 LibVLC/3.0.16'  # Пример реального плеера
             })
@@ -150,28 +159,23 @@ if __name__ == "__main__":
     old_proxies_dict = {}
     try:
         with open("working_proxies.txt", "r") as file:
-            # ✅ Улучшенная логика разбора!
+            # Строгий разбор каждой строки старого файла
             for line in file:
-                try:
-                    # Разделяем строку по вертикальной черте
-                    parts = line.strip().split('|')
-                    
-                    # Первая колонка должна быть URL вида http(s)/socks5h://IP:PORT
-                    url = parts[0].strip() 
+                parts = line.strip().split('|')
+                url = parts[0].strip()
+                
+                # Извлекаем чистый IP:PORT
+                _, address = url.split('://')[:2]
+                ip_port = address.split(':')
 
-                    # Извлекаем чистый IP:PORT
-                    _, address = url.split('://')[:2]
-                    ip_port = address.split(':')
+                # Проверка: должен быть ровно два элемента (IP и PORT), и порт — число
+                if len(ip_port) != 2 or not ip_port[1].isdigit():
+                    print(f"[WARNING] Skipping invalid previous proxy '{line.strip()}': Invalid format")
+                    continue
 
-                    # Проверка: должен быть ровно два элемента (IP и PORT), и порт — число
-                    if len(ip_port) != 2 or not ip_port[1].isdigit():
-                        raise ValueError("Invalid format")
-
-                    ip, _port = ip_port
-                    ports = old_proxies_dict.setdefault(ip, {})
-                    ports[url] = True  # Просто помечаем этот URL как ранее найденный
-                except Exception as e:
-                    print(f"[WARNING] Skipping invalid previous proxy '{line.strip()}': {e}")
+                ip, _port = ip_port
+                ports = old_proxies_dict.setdefault(ip, {})
+                ports[url] = True  # Просто помечаем URL как ранее найденный
     
         print("[INFO] Previous proxy list loaded.")
     except FileNotFoundError:
@@ -210,7 +214,6 @@ if __name__ == "__main__":
             try:
                 resp = requests.get(source, timeout=10)
                 
-                # ✅ Защита от невалидных данных прямо здесь!
                 # Фильтруем строки ДО добавления их в общий массив.
                 # Это гарантирует, что в all_proxies никогда не попадёт мусор.
                 valid_lines = load_proxies_from_source(resp.text)
@@ -228,7 +231,7 @@ if __name__ == "__main__":
     # Проверяем новые адреса
     found_new_proxies = []
     for proxy in all_proxies:
-        # Проверка лимита времени или количества
+        # Проверка лимита времени
         elapsed_minutes = (datetime.datetime.now() - start_script_time).total_seconds() / 60
         if elapsed_minutes >= MAX_WORK_TIME_MINUTES:
             break
@@ -238,23 +241,18 @@ if __name__ == "__main__":
         if results:
             found_new_proxies.extend(results)
 
-    # ✅ Объединение результатов
-    # Считаем динамическую цель: базовое количество + запас
+    # Объединение результатов
     total_target_count = int(TARGET_PROXY_COUNT_BASE * (1 + RESERVE_PERCENTAGE))
 
-    # Преобразуем результаты в удобный вид для записи
-    # {IP: {port1, port2}} -> чтобы не было дублей
-    unique_results = {}
+    unique_results = {}  # {IP: {port1, port2}} -> чтобы не было дублей
     for item in found_old_proxies + found_new_proxies:
         ip = item['url'].split('//')[1].split(':')[0]
         ports = unique_results.setdefault(ip, {})
         ports[item['url']] = item
 
-    # Сортируем по скорости
     sorted_items = sorted([v for p in unique_results.values() for v in p.values()],
                           key=lambda x: x['speed_kbps'], reverse=True)
 
-    # Берём нужное количество
     final_list = sorted_items[:total_target_count]
 
     # Сохраняем основной рабочий файл
