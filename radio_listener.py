@@ -1,6 +1,6 @@
 import socket
 import time
-from urllib.parse import urlparse # Для правильной работы с URL
+from urllib.parse import urlparse  # Для правильной работы с URL
 from multiprocessing import Process
 import random
 import os
@@ -9,7 +9,7 @@ import os
 # Глобальные настройки
 RADIOS = [
     *(['https://listen7.myradio24.com/sintezi'] * 20),
-    *(['https://listen7.myradio24.com/rockataka'] * 5), 
+    *(['https://listen7.myradio24.com/rockataka'] * 5),
     *(['https://listen7.myradio24.com/iridium'] * 3),
     *(['https://listen7.myradio24.com/nevermind'] * 5)
 ]
@@ -58,7 +58,7 @@ def generate_user_agent():
     current_weight = 0
     for brw in BROWSER_WEIGHTS:
         current_weight += brw["weight"]
-        if choice < current_weight:
+        if choice < current weight:
             browser_data = brw
             break
 
@@ -114,30 +114,43 @@ def get_random_proxy():
 
 def keep_radio_alive(url):
     parsed_url = urlparse(url)
-    host = parsed_url.netloc.split(':')[0] 
+    
+    # Разделяем хост и порт стриминг-сервера
+    stream_host = parsed_url.netloc.split(':')[0] 
     path = parsed_url.path  
 
     #### КЛЮЧЕВОЙ МОМЕНТ ####
     # Выбираем случайный прокси (гибридный режим)
     proxy_url = get_random_proxy()
 
-    # Разбираем его на части
+    # Парсим его на части
     proxy_parsed = urlparse(proxy_url)
     proxy_host = proxy_parsed.hostname
     proxy_port = int(proxy_parsed.port or 80)  # По умолчанию HTTP-порт
 
-    headers = (
-        f"CONNECT {parsed_url.netloc} HTTP/1.1\r\n"
-        if parsed_url.scheme == "https" else
-        f"GET {path} HTTP/1.1\r\n"
-    ) + \
-    f"Host: {host}\r\n" \
-    f"{proxy_url}\r\n" \   # Передаём полную строку с логином/паролем
-    f"Icy-MetaData: 1\r\n" \
-    f"User-Agent: {generate_user_agent()}\r\n" \
-    f"Referer: {REFERER_URL}\r\n" \
-    f"Connection: Keep-Alive\r\n" \
-    "\r\n"
+    # Логин и пароль должны быть экранированы квадратными скобками!
+    auth_header = f"{proxy_url}\r\n"  # Оставляем как есть
+
+    headers = ""
+
+    # Определяем тип соединения в зависимости от схемы потока
+    if parsed_url.scheme == "http":
+        # Простой GET-запрос для HTTP-потоков
+        headers += f"GET {url} HTTP/1.1\r\n"
+    else:  # https или пустой (тогда тоже считаем за https)
+        # Метод CONNECT нужен для установления туннеля через прокси
+        headers += f"CONNECT {parsed_url.netloc} HTTP/1.1\r\n"
+
+    # Общие заголовки
+    headers += (
+        f"Host: {stream_host}\r\n" \
+        f"{auth_header}" \                # Передаём полный URL узла с логином/паролем
+        f"Icy-MetaData: 1\r\n" \
+        f"User-Agent: {generate_user_agent()}\r\n" \
+        f"Referer: {REFERER_URL}\r\n" \
+        f"Connection: Keep-Alive\r\n" \
+        "\r\n"
+    )
 
     while True:  
         session_duration = random.randint(SESSION_DURATION_MIN, SESSION_DURATION_MAX)
@@ -147,6 +160,7 @@ def keep_radio_alive(url):
             with socket.create_connection((proxy_host, proxy_port)) as sock:
                 sock.settimeout(READ_TIMEOUT_SEC)  # Чтение каждые 5 секунд
 
+                # Отправка запроса
                 sock.sendall(headers.encode())
                 
                 response_headers = b""
@@ -155,6 +169,15 @@ def keep_radio_alive(url):
                     if not chunk or b"\r\n\r\n" in response_headers:
                         break
                     response_headers += chunk
+
+                # Для HTTPS мы ждём ответ на CONNECT
+                if parsed_url.scheme == "https":
+                    status_line = response_headers.decode().split("\n")[0]
+                    print(f"[DEBUG] Proxy response for {proxy_url}: {status_line}")
+                    
+                    # Если прокси отказал в соединении, прерываем цикл
+                    if not status_line.startswith("HTTP/1.1 2"):
+                        raise Exception(f"Proxy refused connection: {status_line}")
 
                 start_time = time.time()
 
