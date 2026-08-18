@@ -13,24 +13,26 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+      # Загружаем исходники из репозитория
       - name: Checkout code ⚙️
         uses: actions/checkout@v3
 
-      # Устанавливаем зависимости
+      # Создаём и активируем виртуальное окружение
       - name: Install dependencies ⚙️
         run: |
           python -m venv .venv
-          source .venv/bin/activate && pip install --upgrade pip && pip install requests
-          
-      # Получаем API-ключи из секретов и передаём их скрипту как переменные окружения
+          source .venv/bin/activate && pip install --upgrade pip requests
+
+      # Получаем API-ключи из секретов и запускаем скрипт с полным выводом ошибок
       - name: Fetch and Save Residential Proxies ✅
         env:
           PROXIES_IO_API_KEY: ${{ secrets.PROXIES_IO_API_KEY }}
         run: |
-          source .venv/bin/activate && python -u proxy_updater.py || echo "Script failed with error code $?"
-        shell: bash
-        
-      # Проверяем, появился ли файл working_proxies.txt
+          # Объединяем stdout и stderr через tee. Это покажет ВСЕ [FAIL]
+          source .venv/bin/activate && \
+            python -u proxy_updater.py |& tee /dev/tty || echo "Script failed with error code $?"
+      
+      # Проверка наличия файла working_proxies.txt
       - name: Check if file exists ❗️
         run: ls -l working_proxies.txt
 
@@ -40,5 +42,5 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add .
-          git commit -m "Update residential proxies list" || echo "No changes to commit"
+          git commit -m "Update residental proxies list" || echo "No changes to commit"
           git push origin main
