@@ -1,4 +1,4 @@
-name: Update Residental Proxies List
+name: Update Residential Proxies List
 
 on:
   # Запускаем раз в сутки в 4:15 утра по Москве
@@ -21,15 +21,15 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate && pip install --upgrade pip && pip install requests
-
-      # Получаем API-ключи из секретов и передаём их скрипту как переменные окружения ← УБРАЛ ПРОБЕЛ ЗДЕСЬ!
-      - name: Fetch and Save Residental Proxies ✅
+          
+      # Получаем API-ключи из секретов и передаём их скрипту как переменные окружения
+      - name: Fetch and Save Residential Proxies ✅
         env:
           PROXIES_IO_API_KEY: ${{ secrets.PROXIES_IO_API_KEY }}
         run: |
           source .venv/bin/activate && python -u proxy_updater.py || echo "Script failed with error code $?"
-        shell: bash {0: enable_stderr} # <--- Это покажет все [FAIL] ошибки!
-
+        shell: bash
+        
       # Проверяем, появился ли файл working_proxies.txt
       - name: Check if file exists ❗️
         run: ls -l working_proxies.txt
@@ -40,5 +40,5 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add .
-          git commit -m "Update residental proxies list" || echo "No changes to commit"
+          git commit -m "Update residential proxies list" || echo "No changes to commit"
           git push origin main
