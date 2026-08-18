@@ -1,89 +1,99 @@
 import requests
-from time import sleep, time as get_current_time
+from urllib.parse import urlparse, urlunparse
 import random
+import argparse
+import time
 
 
-# Настройки интеграции с Proxies.IO
-API_KEY = "2809925e5feac101b478652d0806a02c" # Вставь сюда свой реальный API-токен из панели управления!
-PROXY_TEMPLATE = f"http://global.proxies.io:{API_KEY}@"
+# Константы для проверки потока
+STREAM_URL = 'https://listen7.myradio24.com/iridium'
+STREAM_TIMEOUT_CONNECT = 5   # Таймаут подключения
+STREAM_TIMEOUT_READ = 60     # Время скачивания первых данных (увеличено)
+STREAM_MIN_SPEED = 1         # Минимальная скорость в KB/s
 
-# Таймауты проверки потока
-STREAM_TIMEOUT_CONNECT = 5   # Тест подключения
-STREAM_TIMEOUT_READ = 10     # Время скачивания первых данных
-
-user_agents = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-]
-
-def check_proxy(proxy_str):
+def check_proxy(api_key: str) -> dict | None:
     """
-    ✅ Проверка одного узла на работоспособность.
-    Возвращает URL рабочей прокси или None.
-    """
+    Проверяет один узел по API-ключу Proxies.IO.
     
-    if ':' not in proxy_str:
-        return None
+    Возвращает словарь с рабочим URL или None, если проверка провалилась.
+    """
+    # Генерируем случайный порт из диапазона резидентских прокси
+    port = random.randint(80_000, 99_999)
 
-    ip_port = proxy_str.strip()
-    protocols_to_check = ['http']  # Оставляем ТОЛЬКО HTTP(S), так как SOCKS часто не работают.
+    # Формируем полный URL прокси-сервера
+    auth = f"{api_key}:"
+    netloc = f"global.proxies.io:{port}"
+    scheme = "http"
 
-    for protocol in protocols_to_check:
-        full_proxy_url = PROXY_TEMPLATE + str(ip_port)
+    # Создаём сессию с одним общим соединением
+    session = requests.Session()
+    proxies = {
+        "http": f"{scheme}://{auth}@{netloc}",
+        "https": f"{scheme}://{auth}@{netloc}"
+    }
+
+    try:
+        # Шаг 1: Получаем реальный внешний IP-адрес текущего узла
+        ip_response = session.get(
+            "https://api.ipify.org",
+            timeout=STREAM_TIMEOUT_CONNECT,
+            proxies=proxies
+        )
         
-        session = requests.Session()
-        adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=50)
-        session.mount('http://', adapter)
-        session.headers.update({'User-Agent': user_agents[0]})
+        if not ip_response.ok or not ip_response.text.strip():
+            print(f"[FAIL] {netloc} - Couldn't get external IP")
+            return None
 
-        try:
-            response = session.get(
-                "https://listen7.myradio24.com/iridium", 
-                stream=True,
-                timeout=(STREAM_TIMEOUT_CONNECT, STREAM_TIMEOUT_READ),
-                verify=False  # Для обхода SSL-ошибок некоторых сайтов
-            )
+        real_ip = ip_response.text.strip()  # Реальный IP узла
+
+        # Заменим домен global.proxies.io на реальный IP
+        parsed_netloc = urlparse(netloc)
+        new_netloc = parsed_netloc._replace(hostname=real_ip).geturl()
+
+        # Шаг 2: Проверка потока музыки на найденном реальном IP
+        with session.get(STREAM_URL, stream=True, timeout=(STREAM_TIMEOUT_CONNECT, STREAM_TIMEOUT_READ), proxies=proxies) as r:
+            start_time = time.time()
             
-            start_time = get_current_time()
-            data_chunk = response.raw.read(4096)  # Читаем первые 4 КБ данных
-            end_time = get_current_time()
+            # Читаем первые данные потока
+            data_chunk = next(r.iter_content(chunk_size=10 * 1024))
+            elapsed = time.time() - start_time
 
-            elapsed_seconds = end_time - start_time
-            speed_kbps = len(data_chunk) / elapsed_seconds / 1024  # KB/s
+            speed_kbps = len(data_chunk) / elapsed / 1024
 
-            # Минимальная скорость снижена до 3 KB/s.
-            # Даже медленные каналы сохраняем в резервный пул.
-            if speed_kbps < 3 or not data_chunk:
-                print(f"[FAIL] {full_proxy_url} - Speed too low ({speed_kbps:.2f} KB/s)")
-                continue
+            if not data_chunk:
+                print(f"[FAIL] {new_netloc} - No data received from stream")
+                return None
 
-            result = {'url': full_proxy_url}
+            if speed_kbps < STREAM_MIN_SPEED:
+                print(f"[FAIL] {new_netloc} - Speed too low ({speed_kbps:.2f} KB/s)")
+                return None
+
+            result = {'url': f"{scheme}://{auth}@{new_netloc}"}
+            print(f"[OK] Added node: {result['url']} (Speed: {speed_kbps:.2f} KB/s)")
             return result
 
-        except Exception as e:
-            print(f"[FAIL] {full_proxy_url}: {str(e)}")
-    
-    return None
+    except Exception as e:
+        print(f"[FAIL] {netloc} - Error: {e}")
+        return None
+    finally:
+        session.close()
 
-def generate_proxies(count=200):  # Количество ботов-плейеров
-    """
-    Генерирует заданное количество уникальных строк подключения.
-    Каждая строка гарантированно выдаст новый российский домашний канал.
-    """
-    proxies = []
-    for _ in range(count):
-        random_port = random.randint(80000, 99999)
-        proxy_str = f"{random_port}"
-        results = check_proxy(proxy_str)
-        if results:
-            proxies.append(results['url'])
-    
-    return proxies
 
 if __name__ == "__main__":
-    working_nodes = generate_proxies()  # Создаёт список из 40 проверенных узлов
+    parser = argparse.ArgumentParser(description="Residental Proxy Updater for MyRadio Listener")
+    parser.add_argument("--count", type=int, default=50, help="Number of ports to generate and test")
+    args = parser.parse_args()
 
+    api_key = input("Enter your Proxies.IO API key: ")
+
+    working_proxies = []
+
+    for _ in range(args.count):
+        result = check_proxy(api_key)
+        if result is not None:
+            working_proxies.append(result["url"])
+
+    # Сохранение списка рабочих узлов
     with open("working_proxies.txt", "w") as file:
-        for node in working_nodes:
-            file.write(node + "\n")
-
-    print(f"\n✅ Saved {len(working_nodes)} working residental IPs.")
+        for p in working_proxies:
+            file.write(p + "\n")
