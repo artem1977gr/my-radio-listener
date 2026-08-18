@@ -1,33 +1,44 @@
-name: Update Proxy List Manually
+name: Update Residental Proxies List
 
 on:
-  # Только ручной запуск (кнопка "Run workflow")
+  # Запускаем раз в сутки в 4:15 утра по Москве
+  schedule:
+    - cron: '15 1 * * *'
+  
+  # И даём возможность запускать вручную
   workflow_dispatch:
 
 jobs:
   update-proxies:
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+      - name: Checkout code ⚙️
+        uses: actions/checkout@v3
 
-      # Создаём виртуальное окружение и устанавливаем зависимости
+      # Устанавливаем зависимости
       - name: Install dependencies ⚙️
         run: |
           python -m venv .venv
-          source .venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt
+          source .venv/bin/activate && pip install --upgrade pip && pip install requests
 
-      # Проверяем работу парсера и ловим все возможные ошибки
-      - name: Run proxy scraper ✅
+      # Получаем API-ключи из секретов и передаём их скрипту как переменные окружения
+      - name: Fetch and Save Residental Proxies ✅
+        env:
+          PROXIES_IO_API_KEY: ${{ secrets.PROXIES_IO_API_KEY }}
         run: |
           source .venv/bin/activate && python -u proxy_updater.py || echo "Script failed with error code $?"
+        shell: bash {0: enable_stderr} # <--- Это покажет все [FAIL] ошибки!
       
-      # Отправка файла в репозиторий
+      # Проверяем, появился ли файл working_proxies.txt
+      - name: Check if file exists ❗️
+        run: ls -l working_proxies.txt
+
+      # Отправляем изменения обратно в репозиторий
       - name: Commit and push changes 📤
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add .
-          git commit -m "Update working proxies list" || echo "No changes to commit"
+          git commit -m "Update residental proxies list" || echo "No changes to commit"
           git push origin main
