@@ -1,6 +1,6 @@
 import socket
 import time
-from urllib.parse import urlparse  # Для правильной работы с URL
+from urllib.parse import urlparse # Для правильной работы с URL
 from multiprocessing import Process
 import random
 import os
@@ -9,7 +9,7 @@ import os
 # Глобальные настройки
 RADIOS = [
     *(['https://listen7.myradio24.com/sintezi'] * 20),
-    *(['https://listen7.myradio24.com/rockataka'] * 5),
+    *(['https://listen7.myradio24.com/rockataka'] * 5), 
     *(['https://listen7.myradio24.com/iridium'] * 3),
     *(['https://listen7.myradio24.com/nevermind'] * 5)
 ]
@@ -21,24 +21,24 @@ READ_TIMEOUT_SEC = 5        # Ключевое изменение!
 
 #### НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
 PLATFORM_WEIGHTS = [  # Веса для платформ
-    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  # Стационарные ПК
-    {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
+    {"os": "Windows", "version": f"NT {random.randint(10, 11)}.0; Win64; x64", "weight": 0.1},  # Стационарные ПК
+    {"os": "Mac OS X", "version": f"{random.randint(10, 15)}_{random.randint(9, 15)}_{random.randint(5, 9)}", "weight": 0.05},
     
     # Мобильная аудитория (большинство пользователей)
-    {"os": "Android", "version": "13", "arch": "SM-S901B", "weight": 0.3},
-    {"os": "iPhone", "version": "16_6", "model": "iPhone14,2", "weight": 0.2},
+    {"os": "Android", "version": str(random.randint(10, 13)), "arch": f"Samsung Galaxy S{random.randint(9, 23)}", "weight": 0.3},
+    {"os": "iPhone", "version": f"{random.randint(14, 17)}_{random.randint(0, 9)}", "model": f"iPhone{random.randint(10, 14)},2", "weight": 0.2},
     
     # Другие десктопы
     {"os": "Linux", "version": "x86_64", "weight": 0.05},
-    {"os": "X11", "version": "Ubuntu; Linux x86_64", "weight": 0.05}
+    {"os": "X11", "version": f"Ubuntu; Linux x86_64", "weight": 0.05}
 ]
 
 BROWSER_WEIGHTS = [  # Веса для браузеров
-    {"name": "Chrome", "version": f"{random.randint(110, 130)}.0.0.0", "weight": 0.6},  # Доминирует
-    {"name": "Firefox", "version": f"1{random.randint(0,3)}0.0", "weight": 0.2},
-    {"name": "Safari", "version": "605.1.15", "weight": 0.1},
-    {"name": "Edge", "version": f"1{random.randint(0,3)}0.0.{random.randint(100, 999)}", "weight": 0.05},
-    {"name": "Opera", "version": f"{random.randint(95, 105)}.0.0.{random.randint(10, 99)}", "weight": 0.05}
+    {"name": "Chrome", "version": f"{random.randint(110, 130)}.0.{random.randint(100, 999)}.0", "weight": 0.6},  # Доминирует
+    {"name": "Firefox", "version": f"{random.randint(100, 120)}.0", "weight": 0.2},
+    {"name": "Safari", "version": f"605.1.{random.randint(10, 20)}", "weight": 0.1},
+    {"name": "Edge", "version": f"{random.randint(100, 120)}.0.{random.randint(100, 999)}.{random.randint(10, 99)}", "weight": 0.05},
+    {"name": "Opera", "version": f"{random.randint(90, 100)}.0.0.{random.randint(10, 99)}", "weight": 0.05}
 ]
 
 
@@ -114,27 +114,37 @@ def get_random_proxy():
 
 def keep_radio_alive(url):
     parsed_url = urlparse(url)
-    host = parsed_url.netloc.split(':')[0]
+    host = parsed_url.netloc.split(':')[0] 
     path = parsed_url.path  
 
+    #### КЛЮЧЕВОЙ МОМЕНТ ####
+    # Выбираем случайный прокси (гибридный режим)
+    proxy_url = get_random_proxy()
+
+    # Разбираем его на части
+    proxy_parsed = urlparse(proxy_url)
+    proxy_host = proxy_parsed.hostname
+    proxy_port = int(proxy_parsed.port or 80)  # По умолчанию HTTP-порт
+
     headers = (
+        f"CONNECT {parsed_url.netloc} HTTP/1.1\r\n"
+        if parsed_url.scheme == "https" else
         f"GET {path} HTTP/1.1\r\n"
-        f"Host: {host}\r\n"
-        
-        #### КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: генерируем сложный UA ####
-        f"Icy-MetaData: 1\r\n"
-        f"User-Agent: {generate_user_agent()}\r\n"
-        
-        f"Referer: {REFERER_URL}\r\n"
-        f"Connection: Keep-Alive\r\n"
-        "\r\n"
-    )
+    ) + \
+    f"Host: {host}\r\n" \
+    f"{proxy_url}\r\n" \   # Передаём полную строку с логином/паролем
+    f"Icy-MetaData: 1\r\n" \
+    f"User-Agent: {generate_user_agent()}\r\n" \
+    f"Referer: {REFERER_URL}\r\n" \
+    f"Connection: Keep-Alive\r\n" \
+    "\r\n"
 
     while True:  
         session_duration = random.randint(SESSION_DURATION_MIN, SESSION_DURATION_MAX)
         
         try:
-            with socket.create_connection((host, 80)) as sock:
+            #### ПОДКЛЮЧАЕМСЯ НЕ К СТРИМИНГУ, А К ПРОКСИ-УЗЛУ ###
+            with socket.create_connection((proxy_host, proxy_port)) as sock:
                 sock.settimeout(READ_TIMEOUT_SEC)  # Чтение каждые 5 секунд
 
                 sock.sendall(headers.encode())
@@ -163,8 +173,7 @@ def keep_radio_alive(url):
         
         finally:
             elapsed = int(time.time() - start_time)
-            # Вот здесь мы выводим реальный выбранный узел
-            print(f"[{elapsed//60}:{elapsed%60:02d}] Listener on {get_random_proxy()} ended.")
+            print(f"[{elapsed//60}:{elapsed%60:02d}] Listener on {proxy_url} ended.")
 
 
 if __name__ == "__main__":
