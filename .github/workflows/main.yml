@@ -1,11 +1,7 @@
-name: Update Residential Proxies List
+name: Update Residential Proxies List ✅
 
 on:
-  # Запускаем раз в сутки в 4:15 утра по Москве
-  schedule:
-    - cron: '15 1 * * *'
-  
-  # И даём возможность запускать вручную
+  # Оставляем только ручное управление через интерфейс GitHub Actions
   workflow_dispatch:
 
 jobs:
@@ -13,41 +9,19 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      # Загружаем исходники из репозитория
       - name: Checkout code ⚙️
         uses: actions/checkout@v3
 
-      # Создаём и активируем виртуальное окружение
       - name: Install dependencies ⚙️
         run: |
           python -m venv .venv
           source .venv/bin/activate && pip install --upgrade pip requests
 
-      # Получаем API-ключи из секретов и передаём их скрипту как переменные окружения
-      # | while read line; do ... — выводит все [FAIL] как предупреждения GitHub
+      # Этот шаг теперь просто выводит логи работы скрипта,
+      # но не меняет содержимое working_proxies.txt
       - name: Fetch and Save Residential Proxies ✅
         env:
           PROXIES_IO_API_KEY: ${{ secrets.PROXIES_IO_API_KEY }}
         run: |
-          # Активируем окружение
           source .venv/bin/activate && \
-            # Запускаем скрипт с выводом ошибок и перенаправляем всё в цикл чтения строк
-            python -u proxy_updater.py --count=200 |& tee /dev/tty | while read line; do
-              # Если строка начинается с [FAIL], выводим её как предупреждение
-              if [[ "$line" == "[FAIL]*" ]]; then
-                echo "::warning::$line"
-              fi
-            done || echo "Script failed with error code $?"
-      
-      # Проверка наличия файла working_proxies.txt
-      - name: Check if file exists ❗️
-        run: ls -l working_proxies.txt
-
-      # Отправляем изменения обратно в репозиторий
-      - name: Commit and push changes 📤
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add .
-          git commit -m "Update residental proxies list" || echo "No changes to commit"
-          git push origin main
+            python -u proxy_updater.py |& cat || echo "Script failed with error code $?"
