@@ -163,6 +163,7 @@ def keep_radio_alive(url):
         
         finally:
             elapsed = int(time.time() - start_time)
+            # Вот здесь мы выводим реальный выбранный узел
             print(f"[{elapsed//60}:{elapsed%60:02d}] Listener on {get_random_proxy()} ended.")
 
 
