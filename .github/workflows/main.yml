@@ -21,7 +21,7 @@ jobs:
       # Проверяем работу парсера и ловим все возможные ошибки
       - name: Run proxy scraper ✅
         run: |
-          source .venv/bin/activate && python -u proxy_scraper.py || echo "Script failed with error code $?"
+          source .venv/bin/activate && python -u proxy_updater.py || echo "Script failed with error code $?"
       
       # Отправка файла в репозиторий
       - name: Commit and push changes 📤
