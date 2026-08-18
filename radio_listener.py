@@ -37,8 +37,8 @@ BROWSER_WEIGHTS = [  # Веса для браузеров
     {"name": "Chrome", "version": f"{random.randint(110, 130)}.0.{random.randint(100, 999)}.0", "weight": 0.6},  # Доминирует
     {"name": "Firefox", "version": f"{random.randint(100, 120)}.0", "weight": 0.2},
     {"name": "Safari", "version": f"605.1.{random.randint(10, 20)}", "weight": 0.1},
-    {"name": "Edge", "version": f"{random.randint(100, 120)}.0.{random.randint(100, 999)}.{random.randint(10, 99)}", "weight": 0.05},
-    {"name": "Opera", "version": f"{random.randint(90, 100)}.0.0.{random.randint(10, 99)}", "weight": 0.05}
+    {"name": "Edge", "version": f"1{random.randint(0,3)}0.0.{random.randint(100, 999)}", "weight": 0.05},
+    {"name": "Opera", "version": f"{random.randint(95, 105)}.0.0.{random.randint(10, 99)}", "weight": 0.05}
 ]
 
 
@@ -58,7 +58,7 @@ def generate_user_agent():
     current_weight = 0
     for brw in BROWSER_WEIGHTS:
         current_weight += brw["weight"]
-        if choice < current weight:
+        if choice < current_weight:
             browser_data = brw
             break
 
