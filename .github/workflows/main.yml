@@ -22,14 +22,14 @@ jobs:
           python -m venv .venv
           source .venv/bin/activate && pip install --upgrade pip && pip install requests
 
-      # Получаем API-ключи из секретов и передаём их скрипту как переменные окружения
+      # Получаем API-ключи из секретов и передаём их скрипту как переменные окружения ← УБРАЛ ПРОБЕЛ ЗДЕСЬ!
       - name: Fetch and Save Residental Proxies ✅
         env:
           PROXIES_IO_API_KEY: ${{ secrets.PROXIES_IO_API_KEY }}
         run: |
           source .venv/bin/activate && python -u proxy_updater.py || echo "Script failed with error code $?"
         shell: bash {0: enable_stderr} # <--- Это покажет все [FAIL] ошибки!
-      
+
       # Проверяем, появился ли файл working_proxies.txt
       - name: Check if file exists ❗️
         run: ls -l working_proxies.txt
