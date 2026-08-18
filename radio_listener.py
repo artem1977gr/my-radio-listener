@@ -152,7 +152,7 @@ def keep_radio_alive(url):
     # Если у выбранного узла есть пароль, отправляем Proxy-Authorization
     if proxy_parsed.password is not None:
         username_password = proxy_parsed.username + ":" + proxy_parsed.password
-        base64_encoded_creds = b64encode(username_password.encode()).decode()
+        base64_encoded_creds = base64.b64encode(username_password.encode()).decode()
         headers += f"Proxy-Authorization: Basic {base64_encoded_creds}\r\n"
 
     headers += "\r\n"
