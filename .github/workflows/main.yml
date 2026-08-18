@@ -1,4 +1,4 @@
-name: Update Residental Proxies List
+name: Update Residential Proxies List # <--- Исправил здесь
 
 on:
   # Запускаем раз в сутки в 4:15 утра по Москве
@@ -22,8 +22,8 @@ jobs:
           python -m venv .venv
           source .venv/bin/activate && pip install --upgrade pip && pip install requests
 
-      # Получаем API-ключи из секретов и передаём их скрипту как переменные окружения ← УБРАЛ ПРОБЕЛ ЗДЕСЬ!
-      - name: Fetch and Save Residental Proxies ✅
+      # Получаем API-ключи из секретов и передаём их скрипту как переменные окружения
+      - name: Fetch and Save Residential Proxies ✅ # <--- Исправил здесь
         env:
           PROXIES_IO_API_KEY: ${{ secrets.PROXIES_IO_API_KEY }}
         run: |
