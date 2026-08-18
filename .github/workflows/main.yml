@@ -1,11 +1,7 @@
-name: Update Proxy List Every Day at 04:15 Moscow Time
+name: Update Proxy List Manually
 
 on:
-  # Запускаем по расписанию каждый день в 01:15 UTC (это 04:15 по Москве)
-  schedule:
-    - cron: '15 1 * * *'
-  
-  # Добавляем возможность запуска вручную
+  # Только ручной запуск (кнопка "Run workflow")
   workflow_dispatch:
 
 jobs:
@@ -14,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Нужно для того, чтобы коммитить изменения обратно в репозиторий
+          fetch-depth: 0
 
       # Создаём виртуальное окружение и устанавливаем зависимости
       - name: Install dependencies ⚙️
@@ -27,13 +23,6 @@ jobs:
         run: |
           source .venv/bin/activate && python -u proxy_scraper.py || echo "Script failed with error code $?"
       
-      # Проверяем, был ли создан файл с прокси
-      - name: Check if file exists ❗️
-        run: |
-          ls -l working_proxies.txt
-          # Если файл существует, следующий шаг будет выполнен
-          # Если нет, это вызовет ошибку и остановит workflow
-
       # Отправка файла в репозиторий
       - name: Commit and push changes 📤
         run: |
