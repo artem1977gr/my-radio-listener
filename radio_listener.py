@@ -9,7 +9,7 @@ import os
 # Глобальные настройки
 RADIOS = [
     *(['https://listen7.myradio24.com/sintezi'] * 20),
-    *(['https://listen7.myradio24.com/rockataka'] * 5),
+    *(['https://listen7.myradio24.com/rockataka'] * 5), 
     *(['https://listen7.myradio24.com/iridium'] * 3),
     *(['https://listen7.myradio24.com/nevermind'] * 5)
 ]
@@ -75,7 +75,7 @@ def generate_user_agent():
 
 def get_random_proxy():
     """
-    Возвращает случайный рабочий URL.
+    Возвращает случайный работающий URL.
     Поддерживает гибридный режим: 50% Москва (Amvera), 50% из working_proxies.txt
     """
 
@@ -129,7 +129,7 @@ def keep_radio_alive(url):
     proxy_port = int(proxy_parsed.port or 80)  # По умолчанию HTTP-порт
 
     # Логин и пароль должны быть экранированы квадратными скобками!
-    auth_header = f"{proxy_url}\r\n"  # Оставляем как есть
+    auth_header = f"{proxy_url}\r\n"  # Передаём полный URL узла с логином/паролем
 
     headers = ""
 
@@ -143,12 +143,12 @@ def keep_radio_alive(url):
 
     # Общие заголовки
     headers += (
-        f"Host: {stream_host}\r\n" \
-        f"{auth_header}" \                # Передаём полный URL узла с логином/паролем
-        f"Icy-MetaData: 1\r\n" \
-        f"User-Agent: {generate_user_agent()}\r\n" \
-        f"Referer: {REFERER_URL}\r\n" \
-        f"Connection: Keep-Alive\r\n" \
+        f"Host: {stream_host}\r\n"
+        f"{auth_header}"
+        f"Icy-MetaData: 1\r\n"
+        f"User-Agent: {generate_user_agent()}\r\n"
+        f"Referer: {REFERER_URL}\r\n"
+        f"Connection: Keep-Alive\r\n"
         "\r\n"
     )
 
