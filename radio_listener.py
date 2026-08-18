@@ -4,6 +4,7 @@ from urllib.parse import urlparse  # Для правильной работы с
 from multiprocessing import Process
 import random
 import os
+import base64  # <--- Добавлено для базовой авторизации
 
 
 # Глобальные настройки
@@ -128,9 +129,6 @@ def keep_radio_alive(url):
     proxy_host = proxy_parsed.hostname
     proxy_port = int(proxy_parsed.port or 80)  # По умолчанию HTTP-порт
 
-    # Логин и пароль должны быть экранированы квадратными скобками!
-    auth_header = f"{proxy_url}\r\n"  # Передаём полный URL узла с логином/паролем
-
     headers = ""
 
     # Определяем тип соединения в зависимости от схемы потока
@@ -141,16 +139,23 @@ def keep_radio_alive(url):
         # Метод CONNECT нужен для установления туннеля через прокси
         headers += f"CONNECT {parsed_url.netloc} HTTP/1.1\r\n"
 
-    # Общие заголовки
+    # Общие заголовки + Базовая авторизация
     headers += (
-        f"Host: {stream_host}\r\n"
-        f"{auth_header}"
-        f"Icy-MetaData: 1\r\n"
-        f"User-Agent: {generate_user_agent()}\r\n"
-        f"Referer: {REFERER_URL}\r\n"
+        f"Host: {stream_host}\r\n" \
+        f"Icy-MetaData: 1\r\n" \  # Убрали строку с полным URL узла
+        f"User-Agent: {generate_user_agent()}\r\n" \
+        f"Referer: {REFERER_URL}\r\n" \
         f"Connection: Keep-Alive\r\n"
-        "\r\n"
     )
+
+    # *** НОВАЯ ЛОГИКА АВТОРИЗАЦИИ ***
+    # Если у выбранного узла есть пароль, отправляем Proxy-Authorization
+    if proxy_parsed.password is not None:
+        username_password = proxy_parsed.username + ":" + proxy_parsed.password
+        base64_encoded_creds = b64encode(username_password.encode()).decode()
+        headers += f"Proxy-Authorization: Basic {base64_encoded_creds}\r\n"
+
+    headers += "\r\n"
 
     while True:  
         session_duration = random.randint(SESSION_DURATION_MIN, SESSION_DURATION_MAX)
