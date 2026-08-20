@@ -6,6 +6,7 @@ import random
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+
 # Глобальные настройки (твои текущие)
 RADIOS = [
     *(['https://listen7.myradio24.com/sintezi'] * 20),
@@ -16,12 +17,11 @@ RADIOS = [
 REFERER_URL = "https://radio.art-test-1.store"
 SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин
 SESSION_DURATION_MAX = 1600  # Максимум ~27 минут
-READ_TIMEOUT_SEC = 5        # Ключевое изменение!
-MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+MOSCOW_TZ = ZoneInfo("Europe/Moscow") # ⚡️ Изменение 1: Таймзона
 
 #### ⚡️ НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
 PLATFORM_WEIGHTS = [  # Веса для платформ
-    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  # Стационарные ПК
+    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
     {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
     
     # Мобильная аудитория (большинство пользователей)
@@ -34,7 +34,7 @@ PLATFORM_WEIGHTS = [  # Веса для платформ
 ]
 
 BROWSER_WEIGHTS = [  # Веса для браузеров
-    {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},  # Доминирует
+    {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},  
     {"name": "Firefox", "version": "121.0", "weight": 0.2},
     {"name": "Safari", "version": "605.1.15", "weight": 0.1},
     {"name": "Edge", "version": "120.0.2210.57", "weight": 0.05},
@@ -89,6 +89,7 @@ def keep_radio_alive(url):
         f"GET {path} HTTP/1.1\r\n"
         f"Host: {host}\r\n"
         
+        #### КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: генерируем сложный UA ###
         f"Icy-MetaData: 1\r\n"
         f"User-Agent: {generate_user_agent()}\r\n"
         
@@ -102,8 +103,9 @@ def keep_radio_alive(url):
         
         try:
             with socket.create_connection((host, 80)) as sock:
-                sock.settimeout(READ_TIMEOUT_SEC)
-                sock.sendall(headers.encode())
+                # ⚡️ Изменение 2: Убираем явный таймаут чтения!
+                # Это позволяет нам держать соединение открытым бесконечно долго.
+                # Мы будем контролировать время жизни процесса через системные часы.
                 
                 response_headers = b""
                 while True:
@@ -115,11 +117,21 @@ def keep_radio_alive(url):
                 start_time = time.time()
 
                 #### ОПТИМИЗАЦИЯ ПОД ОБЛАЧНЫЕ СЕРВЕРЫ ####
-                while int(time.time() - start_time) < session_duration:
+                finish_time = start_time + session_duration # Жёсткий лимит на закрытие
+
+                # 🔥 Ключевое изменение здесь! 🔥
+                # Мы больше не используем таймауты сокета для завершения цикла.
+                # Вместо этого мы читаем данные БЕЗ ЛИМИТА по времени,
+                # а принудительно завершаем цикл только когда наступит финишное время.
+                while int(time.time()) < finish_time:
                     try:
-                        sock.recv(1024)
-                    except socket.timeout:
-                        pass
+                        data = sock.recv(1024)
+                        
+                        # Если сервер закрыл соединение сам
+                        if not data:
+                            print(f"[{time.strftime('%H:%M:%S')}] Server closed connection for {url}. Reconnecting...")
+                            break
+                            
                     except Exception as e:
                         print(f"[{time.strftime('%H:%M:%S')}] Read error for {url}: {e}")
                         break
@@ -129,7 +141,8 @@ def keep_radio_alive(url):
         
         finally:
             elapsed = int(time.time() - start_time)
-            print(f"[{elapsed//60}:{elapsed%60:02d}] Listener on {url} ended.")
+            mins, secs = divmod(elapsed, 60)
+            print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
 
 def get_moscow_hour():
