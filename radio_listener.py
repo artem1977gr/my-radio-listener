@@ -3,11 +3,10 @@ import time
 from urllib.parse import urlparse
 from multiprocessing import Process
 import random
-from collections import Counter
-from datetime import datetime
 from zoneinfo import ZoneInfo
+from datetime import datetime
 
-# Глобальные настройки (ЕДИНСТВЕННЫЙ источник данных)
+# Глобальные настройки (твои текущие)
 RADIOS = [
     *(['https://listen7.myradio24.com/sintezi'] * 20),
     *(['https://listen7.myradio24.com/rockataka'] * 5), 
@@ -38,15 +37,8 @@ BROWSER_WEIGHTS = [
     {"name": "Opera", "version": "98.0.4825.16", "weight": 0.05}
 ]
 
-#### СУТОЧНЫЙ ПРОФИЛЬ НАГРУЗКИ ####
-HOURLY_LOAD = {
-    "00": 0.35, "01": 0.30, "02": 0.25, "03": 0.22, "04": 0.25, "05": 0.35,
-    "06": 0.55, "07": 0.85, "08": 0.98, "09": 0.92, "10": 0.80, "11": 0.75,
-    "12": 0.78, "13": 0.76, "14": 0.74, "15": 0.77, "16": 0.82, "17": 0.90,
-    "18": 1.00, "19": 0.88, "20": 0.75, "21": 0.65, "22": 0.50, "23": 0.40
-}
-
 def generate_user_agent():
+    """Генерирует реалистичный User-Agent."""
     total_weight_platforms = sum(item["weight"] for item in PLATFORM_WEIGHTS)
     choice = random.uniform(0, total_weight_platforms)
     current_weight = 0
@@ -72,6 +64,7 @@ def generate_user_agent():
         f"(KHTML, like Gecko) {browser_data['name']}/{browser_data['version']} "
         f"Safari/537.{random.randint(30, 40)}"
     )
+    
     return ua_template.strip()
 
 
@@ -114,73 +107,26 @@ def keep_radio_alive(url):
                     except socket.timeout:
                         pass
                     except Exception as e:
-                        # Технический лог ошибок оставляем в системном времени сервера
                         print(f"[{time.strftime('%H:%M:%S')}] Read error for {url}: {e}")
                         break
 
         except Exception as e:
-            # Технический лог коннектов оставляем в системном времени сервера
             print(f"[{time.strftime('%H:%M:%S')}] Connection error for {url}: {e}. Reconnecting...")
         
         finally:
-            # ИСПРАВЛЕНО: расчет длительности сессии строго через time.time()
             elapsed = int(time.time() - start_time)
-            
-            # Форматируем вывод вручную, чтобы избежать проблем с часовыми поясами
             mins, secs = divmod(elapsed, 60)
-            
-            # Лог завершения сессии также в системном времени для точности таймера
+            # Таймер сессии работает от системного time.time(), как в оригинале
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
 
+# Функция для получения часа по Москве (исправлена для совместимости)
 def get_moscow_hour():
-    """Возвращает текущий час строкой ('00'-'23') именно по Москве."""
     return datetime.now(MOSCOW_TZ).strftime("%H")
-
 
 def get_current_hour_factor():
     hour_str = get_moscow_hour()
     return HOURLY_LOAD.get(hour_str, 1.0)
-
-
-def build_target_pool(target_total, source_list):
-    """
-    Вычисляет абсолютные веса из списка RADIOS и собирает целевой пул процессов.
-    Изменение количества станций или их 'звездочек' меняет результат автоматически.
-    """
-    pool = []
-    counts = Counter(source_list)
-    unique_urls = list(dict.fromkeys(source_list))
-    
-    base_quotas = dict(counts)
-    
-    if target_total < sum(base_quotas.values()):
-        temp_pool = []
-        for url in unique_urls:
-            share = round(target_total * (base_quotas[url] / sum(base_quotas.values())))
-            temp_pool.extend([url] * share)
-        
-        diff = target_total - len(temp_pool)
-        if diff > 0:
-            for _ in range(diff):
-                temp_pool.append(random.choice(unique_urls))
-        elif diff < 0:
-            for _ in range(abs(diff)):
-                if temp_pool:
-                    temp_pool.pop()
-        
-        pool = temp_pool
-    else:
-        for url in unique_urls:
-            pool.extend([url] * base_quotas[url])
-            
-        remainder = target_total - len(pool)
-        if remainder > 0:
-            for i in range(remainder):
-                pool.append(unique_urls[i % len(unique_urls)])
-
-    random.shuffle(pool)
-    return pool
 
 
 if __name__ == "__main__":
@@ -188,7 +134,7 @@ if __name__ == "__main__":
     last_logged_hour = None
     
     while True:
-        # Мягкая остановка старых процессов (старше 1 минуты)
+        # Мягкая остановка старых процессов
         alive_new = []
         for p in processes:
             if p.is_alive():
@@ -199,7 +145,7 @@ if __name__ == "__main__":
                     alive_new.append(p)
         processes = alive_new
 
-        # Расчет нагрузки ПО МОСКОВСКОМУ ВРЕМЕНИ
+        # Расчет целевой нагрузки ТОЛЬКО по Москве
         current_hour = get_moscow_hour()
         
         if current_hour != last_logged_hour:
@@ -209,16 +155,20 @@ if __name__ == "__main__":
 
         factor = get_current_hour_factor()
         
-        # Целевое число берется от фактической длины вашего массива RADIOS
+        # ВАША ЛОГИКА ИЗ КОДА 1: 
+        # Общее число слушателей берется из длины списка RADIOS (с учетом дублей!)
         target_total = int(len(RADIOS) * factor)
         
-        # Передаем весь список RADIOS как единый источник правды
-        target_pool = build_target_pool(target_total, RADIOS)
+        # Распределение ровно такое же, как в вашем первом сообщении:
+        # просто перемешиваем список нужного размера
+        pool = RADIOS.copy()
+        pool = pool[:target_total]
+        random.shuffle(pool)
 
-        needed = len(target_pool) - len(processes)
+        needed = len(pool) - len(processes)
         
         if needed > 0:
-            urls_to_start = target_pool[len(processes):]
+            urls_to_start = pool[len(processes):]
             for url in urls_to_start:
                 p = Process(target=keep_radio_alive, args=(url,))
                 p._start_time = time.time()
