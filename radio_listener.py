@@ -5,7 +5,7 @@ from multiprocessing import Process, current_process
 import random
 from datetime import datetime, timezone
 
-# Глобальные настройки потоков (сумма = пик в 40 слушателей)
+# Глобальные настройки потоков (сумма = пик в 40 слушателей )
 RADIOS = [
     *(['https://listen7.myradio24.com/sintezi'] * 20),
     *(['https://listen7.myradio24.com/rockataka'] * 5), 
