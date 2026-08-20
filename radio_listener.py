@@ -8,10 +8,10 @@ from datetime import datetime, timezone
 
 # Глобальные настройки потоков (сумма = пик)
 RADIOS = [
-    *(['https://listen7.myradio24.com/sintezi'] * 20),
-    *(['https://listen7.myradio24.com/rockataka'] * 5), 
-    *(['https://listen7.myradio24.com/iridium'] * 5),
-    *(['https://listen7.myradio24.com/nevermind'] * 10)
+    *(['https://listen7.myradio24.com/sintezi'] * 31),
+    *(['https://listen7.myradio24.com/rockataka'] * 8), 
+    *(['https://listen7.myradio24.com/iridium'] * 10),
+    *(['https://listen7.myradio24.com/nevermind'] * 30)
 ]
 REFERER_URL = "https://radio.art-test-1.store"
 SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин
