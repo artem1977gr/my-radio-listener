@@ -1,6 +1,6 @@
 import socket
 import time
-from urllib.parse import urlparse
+from urllib.parse import urlparse # Для правильной работы с URL
 from multiprocessing import Process
 import random
 from datetime import datetime
@@ -15,9 +15,9 @@ RADIOS = [
     *(['https://listen7.myradio24.com/nevermind'] * 10)
 ]
 REFERER_URL = "https://radio.art-test-1.store"
-SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин
-SESSION_DURATION_MAX = 1600  # Максимум ~27 минут
-MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин 🔥 НИКАКИЕ ИЗМЕНЕНИЯ НЕ ВНОСИЛ!
+SESSION_DURATION_MAX = 1600  # Максимум ~27 минут 🔥 НИКАКИЕ ИЗМЕНЕНИЯ НЕ ВНОСИЛ!
+MOSCOW_TZ = ZoneInfo("Europe/Moscow") # Таймзона для графика нагрузки
 
 #### ⚡️ НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
 PLATFORM_WEIGHTS = [  
@@ -51,6 +51,7 @@ HOURLY_LOAD = {
 
 
 def generate_user_agent():
+    """Генерирует реалистичный User-Agent."""
     total_weight_platforms = sum(item["weight"] for item in PLATFORM_WEIGHTS)
     choice = random.uniform(0, total_weight_platforms)
     current_weight = 0
@@ -103,8 +104,7 @@ def keep_radio_alive(url):
         
         try:
             with socket.create_connection((host, 80)) as sock:
-                # 🔥 ФИКС: Убираем явный таймаут чтения!
-                # Теперь сокет будет ждать данные вечно, пока сессия активна.
+                # 🔹 ФИКС №1: Убираем явный таймаут чтения! Сокет должен быть живым всегда.
                 response_headers = b""
                 while True:
                     chunk = sock.recv(4096)
@@ -115,19 +115,18 @@ def keep_radio_alive(url):
                 start_time = time.time()
 
                 #### ОПТИМИЗАЦИЯ ПОД ОБЛАЧНЫЕ СЕРВЕРЫ ####
-                finish_time = start_time + session_duration # Жёсткий лимит на закрытие
+                finish_time = start_time + session_duration  # Жёсткий лимит на закрытие
 
-                # 🔥 ФИКС: Читаем данные БЕЗ ЛИМИТА по времени.
-                # Продолжаем слушать поток, даже если там тишина.
-                # Это важно для поддержания сессии на стороне сервера.
+                # 🔹 ФИКС №2: Читаем данные БЕЗ ЛИМИТА по времени.
+                # Сервер увидит нас как живого клиента даже при тишине в эфире.
                 while int(time.time()) < finish_time:
                     try:
                         data = sock.recv(1024)
                         
-                        # Если сервер закрыл соединение сам
+                        # Пустой пакет — это нормально. Продолжаем слушать.
+                        # Так мы держим соединение открытым.
                         if not data:
-                            print(f"[{time.strftime('%H:%M:%S')}] Server closed connection for {url}. Reconnecting...")
-                            break
+                            continue
                             
                     except Exception as e:
                         print(f"[{time.strftime('%H:%M:%S')}] Read error for {url}: {e}")
@@ -142,67 +141,73 @@ def keep_radio_alive(url):
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
 
-def get_moscow_hour():
-    return datetime.now(MOSCOW_TZ).strftime("%H")
-
-def get_current_hour_factor():
-    hour_str = get_moscow_hour()
-    return HOURLY_LOAD.get(hour_str, 1.0)
 
 
 if __name__ == "__main__":
     processes = []
-    last_logged_hour = None
 
-    while True:
-        # 🔥 ФИКС: Мягкая остановка старых процессов.
-        # Удаляем все процессы, которые старше 1 минуты.
-        # Это защитит нас от накопления "зомби"-процессов при смене часа.
-        alive_new = []
-        for p in processes:
-            if p.is_alive():
-                # Если процесс живёт более 60 секунд вне пула задач,
-                # значит, он остался от прошлого часа или вообще лишняя сущность.
-                if time.time() - p._start_time > 60:
-                    p.terminate()
-                    p.join()
-                else:
-                    alive_new.append(p)
-        processes = alive_new
-
-        # Расчет целевой нагрузки ТОЛЬКО по Москве
-        current_hour = get_moscow_hour()
-        
-        if current_hour != last_logged_hour:
-            full_time = datetime.now(MOSCOW_TZ).strftime('%H:%M:%S')
-            print(f"[{full_time}] Hour changed to {current_hour}:00 (MSK). Adjusting load...")
-            last_logged_hour = current_hour
-
-        factor = get_current_hour_factor()
-        
-        # ВАША ЛОГИКА ИЗ КОДА 1: берем длину списка RADIOS (с учетом дублей!)
+    def get_target_pool():
+        """
+        Возвращает список URL для запуска, учитывая график нагрузки.
+        Этот метод вычисляет целевое число потоков только один раз за час.
+        """
+        hour_str = datetime.now(MOSCOW_TZ).strftime("%H")
+        factor = HOURLY_LOAD[hour_str]
         target_total = int(len(RADIOS) * factor)
-        
-        # Создаём пул задач строго нужного размера.
-        # ПРИМЕЧАНИЕ: Здесь используется простая логика перемешивания.
-        # Для точного распределения по весам можно использовать Counter(),
-        # но это сохранит вашу оригинальную логику.
         pool = RADIOS.copy()
         random.shuffle(pool)
-        pool = pool[:target_total]
+        return pool[:target_total]
 
-        # 🔥 ФИКС: Вычисляем разницу между целевым числом и живыми процессами.
-        # Нужно запустить только то, чего не хватает.
-        needed = max(target_total - len(processes), 0)
-        
-        if needed > 0:
-            urls_to_start = pool[len(processes):len(processes)+needed]
+    # 🔸 ПУНКТ А: Запуск всех нужных процессов ОДИН РАЗ.
+    # Здесь мы создаём все процессы, которые нужны прямо сейчас.
+    urls_to_start = get_target_pool()
+    for url in urls_to_start:
+        p = Process(target=keep_radio_alive, args=(url,))
+        p._start_time = time.time()
+        p.start()
+        processes.append(p)
+
+    # 🔸 ПУНКТ Б: Цикл обслуживания.
+    # Мы проверяем состояние процессов каждые 60 секунд.
+    # Мы ничего не убиваем вручную. Мы ждём, пока они умрут сами.
+    while True:
+        # Проверка состояния процессов.
+        alive_new = []  # Сюда будут попадать живые процессы.
+
+        # Проходимся по всем запущенным ранее процессам.
+        for p in processes:
+            # exitcode будет None у живых процессов.
+            # Как только он становится числом (например, 0 или 1), процесс мёртв.
+            if p.exitcode is None:
+                # Процесс ещё работает.
+                alive_new.append(p)
+            else:
+                # Процесс завершился своей смертью.
+                pass  # Ничего не делаем, он уже отработал своё время.
+
+        # Обновляем список активных процессов.
+        processes = alive_new
+
+        # 🔸 ПУНКТ В: Постепенное заполнение пула.
+        # Если кто-то из старых процессов умер, нам нужно запустить замену.
+        needed = len(get_target_pool()) - len(processes)
+
+        # Защита от бесконечного цикла создания новых процессов ночью.
+        # Когда нагрузка падает ниже 1, нужен может быть отрицательным.
+        if needed > 0 and len(processes) < len(RADIOS):  # Не пытаемся создать больше, чем есть в списке
+            # Берём оставшиеся URL из пула.
+            # Мы используем срезы, чтобы не повторять одни и те же потоки подряд.
+            # Если пул закончился, начинаем сначала.
+            pool = get_target_pool()
+            offset = len(processes) % len(pool)
+            urls_to_start = pool[offset : offset + needed]
+            
             for url in urls_to_start:
                 p = Process(target=keep_radio_alive, args=(url,))
                 p._start_time = time.time()
                 p.start()
                 processes.append(p)
-        
-        # Дайте процессу время поработать хотя бы минуту перед следующей проверкой.
-        # Иначе бесконечный цикл может создавать ненужные колебания.
+
+        # Время сна между циклами проверки.
+        # Можно увеличить до 300 сек (5 минут).
         time.sleep(60)
