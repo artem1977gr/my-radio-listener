@@ -128,7 +128,7 @@ def keep_radio_alive(url):
 
 def get_moscow_hour():
     """Возвращает текущий час строкой ('00'-'23') именно по Москве."""
-    # Исправлено для совместимости со старыми версиями Python
+    # ПОЛНОСТЬЮ ИСПРАВЛЕНО: используем только datetime
     return datetime.now(MOSCOW_TZ).strftime("%H")
 
 
@@ -138,17 +138,12 @@ def get_current_hour_factor():
 
 
 def build_target_pool(target_total, source_list):
-    """
-    Вычисляет абсолютные веса из списка RADIOS и собирает целевой пул процессов.
-    Изменение количества станций или их 'звездочек' меняет результат автоматически.
-    """
     pool = []
     counts = Counter(source_list)
-    unique_urls = list(dict.fromkeys(source_list)) # Сохраняем порядок первого появления
+    unique_urls = list(dict.fromkeys(source_list))
     
     base_quotas = dict(counts)
     
-    # Если нужно меньше процессов, чем сумма всех квот, пропорционально уменьшаем
     if target_total < sum(base_quotas.values()):
         temp_pool = []
         for url in unique_urls:
@@ -166,7 +161,6 @@ def build_target_pool(target_total, source_list):
         
         pool = temp_pool
     else:
-        # Если цель равна или больше суммы квот, выдаем полные квоты + остаток
         for url in unique_urls:
             pool.extend([url] * base_quotas[url])
             
@@ -184,7 +178,6 @@ if __name__ == "__main__":
     last_logged_hour = None
     
     while True:
-        # Мягкая остановка старых процессов (старше 1 минуты)
         alive_new = []
         for p in processes:
             if p.is_alive():
@@ -204,11 +197,8 @@ if __name__ == "__main__":
             last_logged_hour = current_hour
 
         factor = get_current_hour_factor()
-        
-        # Целевое число берется от фактической длины вашего массива RADIOS
         target_total = int(len(RADIOS) * factor)
         
-        # Передаем весь список RADIOS как единый источник правды
         target_pool = build_target_pool(target_total, RADIOS)
 
         needed = len(target_pool) - len(processes)
