@@ -19,6 +19,24 @@ SESSION_DURATION_MAX = 1600
 READ_TIMEOUT_SEC = 5        
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
+#### НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
+PLATFORM_WEIGHTS = [  
+    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
+    {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
+    {"os": "Android", "version": "13", "arch": "SM-S901B", "weight": 0.3},
+    {"os": "iPhone", "version": "16_6", "model": "iPhone14,2", "weight": 0.2},
+    {"os": "Linux", "version": "x86_64", "weight": 0.05},
+    {"os": "X11", "version": "Ubuntu; Linux x86_64", "weight": 0.05}
+]
+
+BROWSER_WEIGHTS = [  
+    {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},  
+    {"name": "Firefox", "version": "121.0", "weight": 0.2},
+    {"name": "Safari", "version": "605.1.15", "weight": 0.1},
+    {"name": "Edge", "version": "120.0.2210.57", "weight": 0.05},
+    {"name": "Opera", "version": "98.0.4825.16", "weight": 0.05}
+]
+
 #### СУТОЧНЫЙ ПРОФИЛЬ НАГРУЗКИ ####
 HOURLY_LOAD = {
     "00": 0.35, "01": 0.30, "02": 0.25, "03": 0.22, "04": 0.25, "05": 0.35,
@@ -89,7 +107,7 @@ def keep_radio_alive(url):
 
                 start_time = time.time()
                 
-                # Фиксируем точное время финиша сессии (ваше требование к длительности)
+                # Фиксируем точное время финиша сессии
                 finish_time = start_time + session_duration
 
                 # Цикл прослушивания с жесткой проверкой лимита времени
@@ -107,7 +125,6 @@ def keep_radio_alive(url):
                             break
                             
                     except socket.timeout:
-                        # Это нормально, просто ждем дальше до истечения finish_time
                         continue
                     except Exception as e:
                         print(f"[{time.strftime('%H:%M:%S')}] Read error for {url}: {e}")
@@ -119,7 +136,6 @@ def keep_radio_alive(url):
         finally:
             elapsed = int(time.time() - start_time)
             mins, secs = divmod(elapsed, 60)
-            # Таймер использует чистый системный time.time()
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
 
