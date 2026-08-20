@@ -137,7 +137,8 @@ CHECK_INTERVAL_SEC = 300       # Как часто проверять распи
 GRACEFUL_STOP_DELAY = 120     # Задержка перед принудительным убийством процесса (сек)
 
 # 🔥 ВАЖНО! Здесь мы вычисляем BASE_LISTENERS динамически,
-# исходя из длины вашего списка RADIOS. Это база для расчёта процентов.
+# исходя из длины вашего списка RADIOS. Если вы измените количество адресов,
+# это значение изменится автоматически.
 BASE_LISTENERS = len(RADIOS)
 
 # ✅ ТАБЛИЦА ПРОЦЕНТОВ ОТ MAXIMUM
@@ -151,74 +152,78 @@ TARGET_PERCENT_BY_HOUR = {
 def get_target_listeners_for_now():
     """
     Получает целевое число слушателей как процент от текущего размера списка URL.
+    Защищено от ошибки KeyError, если вдруг в графике нет часа.
     """
     utc_hour = datetime.now(timezone.utc).hour
-    percent = TARGET_PERCENT_BY_HOUR[utc_hour]
-    target_count = int(BASE_LISTENERS * (percent / 100))
+    percent = TARGET_PERCENT_BY_HOUR.get(utc_hour, 0) / 100  # Возвращаем 0%, если часа нет
+    target_count = int(BASE_LISTENERS * percent)
     return target_count
+
+
+class SlotProcess(Process):
+    """
+    Подкласс стандартного Process, который хранит информацию о своём слоте.
+    Это решает проблему смещения индексов при использовании .insert().
+    """
+    def __init__(self, slot_index, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.slot = slot_index  # Сохраняем номер слота
 
 
 def scheduler_manager(active_processes):
     """
-    Управляет пулом процессов плавно.
-    При переходе на меньший % убивает только лишние процессы, но не перераспределяет их сразу.
+    Управляет пулом процессов строго по списку RADIOS.
+    Каждый процесс имеет уникальный идентификатор своего URL-слота.
     """
     alive_processes = [p for p in active_processes if p.is_alive()]
 
     # Текущее время по UTC
     new_target = get_target_listeners_for_now()
 
-    # Мы ограничиваем целевую цифру длиной нашего списка URL
-    max_possible_listeners = len(RADIOS)
-    target_count = min(new_target, max_possible_listeners)
+    # Вычисляем занятые слоты через наш новый атрибут process.slot
+    occupied_slots = {getattr(p, 'slot', None) for p in alive_processes}
+    free_slots = set(range(len(RADIOS))) - occupied_slots
 
-    current_live = len(alive_processes)
+    to_spawn = new_target - len(alive_processes)
 
-    #### УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ (Плавно!) ####
-    # Нам нужно оставить только нужное количество процессов.
-    # Но мы НЕ будем перебрасывать их на другие станции.
-    # Просто оставим самых молодых, а старых удалим.
-    processes_to_kill = []
-
-    # Сначала сортируем процессы по времени старта (самые старые первыми)
-    sorted_processes = sorted(
-        [(process.start(), process) for process in alive_processes],
-        key=lambda x: x[0],  # Время старта
-        reverse=True          # Самые старые идут первыми
-    )
-
-    # Берём только ссылки на объекты процессов
-    sorted_processes = [item[1] for item in sorted_processes]
-
-    # Оставляем первых N процессов, где N = target_count
-    alive_processes = sorted_processes[:target_count]
-
-    # Все остальные должны быть закрыты
-    processes_to_kill = sorted_processes[target_count:]
-
-    for p in processes_to_kill:
-        if p.is_alive():
-            p.terminate()
-            p.join(timeout=GRACEFUL_STOP_DELAY)
-            if p.is_alive():
-                p.kill()
-
-    #### ДОБОР ПРОЦЕССОВ (Переход с меньшего % на больший) ####
-    free_slots = set(range(len(RADIOS))) - {active_processes.index(p) for p in alive_processes}
-    to_spawn = target_count - current_live
-
-    # Запускаем новые процессы в случайные свободные слоты
-    # Так как мы убивали только лишние, а не перераспределяли,
-    # то здесь просто заполняем пустоты.
+    #### ДОБОР ПРОЦЕССОВ ####
+    # Запускаем новые процессы в свободные слоты
     if to_spawn > 0 and free_slots:
         slots_to_fill = list(free_slots)[:to_spawn]
         for slot_index in slots_to_fill:
             radio_url = RADIOS[slot_index]
-            p = Process(target=keep_radio_alive, args=(radio_url,))
+            
+            # Создаём процесс с сохранением номера его слота
+            p = SlotProcess(slot=slot_index, target=keep_radio_alive, args=(radio_url,))
             p.start()
-            # Важно вставить новый процесс именно в его слот
-            alive_processes.insert(slot_index, p)
             print(f"[MANAGER] Spawned listener #{slot_index} -> {radio_url}")
+            alive_processes.append(p)  # Просто добавляем в конец списка
+
+    #### УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ (Плавно!) ####
+    elif len(alive_processes) > new_target:
+        processes_to_kill = []
+
+        # Сортируем живые процессы по времени старта (самые старые первыми)
+        sorted_processes = sorted(
+            [(p.start(), p) for p in alive_processes],
+            key=lambda x: x[0], reverse=True  # Самые старые идут первыми
+        )
+
+        # Берём только ссылки на объекты процессов
+        sorted_processes = [item[1] for item in sorted_processes]
+
+        # Оставляем первых N процессов, где N = target_count
+        alive_processes = sorted_processes[:new_target]
+
+        # Все остальные должны быть закрыты
+        processes_to_kill = sorted_processes[new_target:]
+
+        for p in processes_to_kill:
+            if p.is_alive():
+                p.terminate()
+                p.join(timeout=GRACEFUL_STOP_DELAY)
+                if p.is_alive():
+                    p.kill()
 
     manager_active.clear()
     manager_active.extend(alive_processes)
@@ -234,7 +239,7 @@ if __name__ == "__main__":
 
     try:
         while True:
-            time.sleep(CHECK_INTERVAL_SEC)  # Спит 5 минут (300 сек)
+            time.sleep(CHECK_INTERVAL_SEC)  # Спим 5 минут (300 сек)
             
             new_target = get_target_listeners_for_now()
             # Очищаем список от завершившихся естественным путем процессов
