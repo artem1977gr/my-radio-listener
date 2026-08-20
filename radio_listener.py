@@ -16,7 +16,7 @@ RADIOS = [
 REFERER_URL = "https://radio.art-test-1.store"
 SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин
 SESSION_DURATION_MAX = 1600  # Максимум ~27 минут
-READ_TIMEOUT_SEC = 5        # Ключевое изменение!
+READ_TIMEOUT_SEC = 5         # Ключевое изменение!
 
 
 #### ⚡️ НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
@@ -160,13 +160,17 @@ def get_target_listeners_for_now():
     return target_count
 
 
+# === ФИКС ОШИБКИ ===
+# Мы создаём новый класс, который хранит номер слота.
+# Теперь у него правильный конструктор.
 class SlotProcess(Process):
     """
     Подкласс стандартного Process, который хранит информацию о своём слоте.
     Это решает проблему смещения индексов при использовании .insert().
     """
-    def __init__(self, slot_index, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, slot_index, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
+        # Вызываем родительский конструктор со всеми нужными аргументами.
+        super().__init__(group=group, target=target, name=name, args=args, kwargs=kwargs, daemon=daemon)
         self.slot = slot_index  # Сохраняем номер слота
 
 
@@ -194,7 +198,8 @@ def scheduler_manager(active_processes):
             radio_url = RADIOS[slot_index]
             
             # Создаём процесс с сохранением номера его слота
-            p = SlotProcess(slot=slot_index, target=keep_radio_alive, args=(radio_url,))
+            # Исправленная строка инициализации
+            p = SlotProcess(slot_index=slot_index, target=keep_radio_alive, args=(radio_url,))
             p.start()
             print(f"[MANAGER] Spawned listener #{slot_index} -> {radio_url}")
             alive_processes.append(p)  # Просто добавляем в конец списка
