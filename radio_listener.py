@@ -137,52 +137,52 @@ CHECK_INTERVAL_SEC = 300       # Как часто проверять распи
 GRACEFUL_STOP_DELAY = 120     # Задержка перед принудительным убийством процесса (сек)
 
 # 🔥 ВАЖНО! Здесь мы вычисляем BASE_LISTENERS динамически,
-# исходя из длины вашего списка RADIOS. Если вы измените количество адресов,
-# это значение изменится автоматически.
+# исходя из длины вашего списка RADIOS. Это база для расчёта процентов.
 BASE_LISTENERS = len(RADIOS)
 
-# Ваша таблица активности, нормализованная под BASE_LISTENERS
-TARGET_LISTENERS_BY_HOUR = {
-    0: 8, 1: 10, 2: 14, 3: 22, 4: 34, 5: 39, 6: 36, 7: 32,
-    8: 30, 9: 31, 10: 30, 11: 29, 12: 30, 13: 32, 14: 36, 15: BASE_LISTENERS,
-    16: 35, 17: 30, 18: 26, 19: 20, 20: 16, 21: 14, 22: 12, 23: 10
+# ✅ ТАБЛИЦА ПРОЦЕНТОВ ОТ MAXIMUM
+# Теперь каждый час выражен в процентах от BASE_LISTENERS.
+TARGET_PERCENT_BY_HOUR = {
+    0: 22, 1: 25, 2: 35, 3: 55, 4: 85, 5: 98, 6: 92, 7: 80,
+    8: 75, 9: 78, 10: 76, 11: 74, 12: 77, 13: 82, 14: 90, 15: 100,
+    16: 88, 17: 75, 18: 65, 19: 50, 20: 40, 21: 35, 22: 30, 23: 25
 }
 
 
 def get_target_listeners_for_now():
-    """Получает целевое число слушателей для текущего часа по UTC"""
+    """
+    Получает целевое число слушателей как процент от текущего размера списка URL.
+    """
     utc_hour = datetime.now(timezone.utc).hour
-    return TARGET_LISTENERS_BY_HOUR[utc_hour]
+    percent = TARGET_PERCENT_BY_HOUR[utc_hour]
+    target_count = int(BASE_LISTENERS * (percent / 100))
+    return target_count
 
 
 def scheduler_manager(active_processes):
     """
-    Управляет пулом процессов на основе свободных слотов.
-    Каждый элемент списка RADIOS становится уникальным "слотом".
+    Управляет пулом процессов так, чтобы их было ровно столько,
+    сколько указано в расписании, но не больше длины списка RADIOS.
     """
-    # Очистка зомби-процессов
     alive_processes = [p for p in active_processes if p.is_alive()]
 
     # Текущее время по UTC
-    utc_hour = datetime.now(timezone.utc).hour
-    target_count = TARGET_LISTENERS_BY_HOUR[utc_hour]
+    new_target = get_target_listeners_for_now()
 
     # Мы ограничиваем целевую цифру длиной нашего списка URL
     max_possible_listeners = len(RADIOS)
-    target_count = min(target_count, max_possible_listeners)
+    target_count = min(new_target, max_possible_listeners)
 
-    # Проверяем текущее состояние
     current_live = len(alive_processes)
 
     #### ДОБОР ПРОЦЕССОВ ####
-    # Нам нужно столько же процессов, сколько указано в графике, но не больше длины списка
+    # Нам нужно столько же процессов, сколько указано в графике, но не более длины списка
     free_slots = set(range(len(RADIOS)))  # Все возможные слоты
     occupied_slots = {active_processes.index(p) for p in alive_processes}  # Занятые слоты
     free_slots -= occupied_slots  # Оставшиеся свободные слоты
 
     to_spawn = target_count - current_live
     if to_spawn > 0 and free_slots:
-        # Запускаем новые процессы в случайные свободные слоты
         slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
         for slot_index in slots_to_fill:
             radio_url = RADIOS[slot_index]
