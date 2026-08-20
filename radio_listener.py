@@ -19,31 +19,13 @@ SESSION_DURATION_MAX = 1600
 READ_TIMEOUT_SEC = 5        
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
-#### ⚡️ СУТОЧНЫЙ ПРОФИЛЬ НАГРУЗКИ (был пропущен) ####
+#### СУТОЧНЫЙ ПРОФИЛЬ НАГРУЗКИ ####
 HOURLY_LOAD = {
     "00": 0.35, "01": 0.30, "02": 0.25, "03": 0.22, "04": 0.25, "05": 0.35,
     "06": 0.55, "07": 0.85, "08": 0.98, "09": 0.92, "10": 0.80, "11": 0.75,
     "12": 0.78, "13": 0.76, "14": 0.74, "15": 0.77, "16": 0.82, "17": 0.90,
     "18": 1.00, "19": 0.88, "20": 0.75, "21": 0.65, "22": 0.50, "23": 0.40
 }
-
-#### НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
-PLATFORM_WEIGHTS = [  
-    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
-    {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
-    {"os": "Android", "version": "13", "arch": "SM-S901B", "weight": 0.3},
-    {"os": "iPhone", "version": "16_6", "model": "iPhone14,2", "weight": 0.2},
-    {"os": "Linux", "version": "x86_64", "weight": 0.05},
-    {"os": "X11", "version": "Ubuntu; Linux x86_64", "weight": 0.05}
-]
-
-BROWSER_WEIGHTS = [  
-    {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},  
-    {"name": "Firefox", "version": "121.0", "weight": 0.2},
-    {"name": "Safari", "version": "605.1.15", "weight": 0.1},
-    {"name": "Edge", "version": "120.0.2210.57", "weight": 0.05},
-    {"name": "Opera", "version": "98.0.4825.16", "weight": 0.05}
-]
 
 def generate_user_agent():
     """Генерирует реалистичный User-Agent."""
@@ -72,7 +54,6 @@ def generate_user_agent():
         f"(KHTML, like Gecko) {browser_data['name']}/{browser_data['version']} "
         f"Safari/537.{random.randint(30, 40)}"
     )
-    
     return ua_template.strip()
 
 
@@ -107,13 +88,27 @@ def keep_radio_alive(url):
                     response_headers += chunk
 
                 start_time = time.time()
+                
+                # Фиксируем точное время финиша сессии (ваше требование к длительности)
+                finish_time = start_time + session_duration
 
-                #### ОПТИМИЗАЦИЯ ПОД ОБЛАЧНЫЕ СЕРВЕРЫ ####
-                while int(time.time() - start_time) < session_duration:
+                # Цикл прослушивания с жесткой проверкой лимита времени
+                while True:
+                    # Если вышло отведенное время (от 100 до 1600 сек) - выходим
+                    if time.time() >= finish_time:
+                        break
+
                     try:
-                        sock.recv(1024)
+                        sock.settimeout(READ_TIMEOUT_SEC)
+                        data = sock.recv(1024)
+                        
+                        # Если сервер закрыл соединение сам
+                        if not data: 
+                            break
+                            
                     except socket.timeout:
-                        pass
+                        # Это нормально, просто ждем дальше до истечения finish_time
+                        continue
                     except Exception as e:
                         print(f"[{time.strftime('%H:%M:%S')}] Read error for {url}: {e}")
                         break
@@ -124,11 +119,10 @@ def keep_radio_alive(url):
         finally:
             elapsed = int(time.time() - start_time)
             mins, secs = divmod(elapsed, 60)
-            # Таймер сессии использует чистый time.time(), как в вашем рабочем Коде 1
+            # Таймер использует чистый системный time.time()
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
 
-# Функция для получения часа по Москве (исправлена для совместимости)
 def get_moscow_hour():
     return datetime.now(MOSCOW_TZ).strftime("%H")
 
@@ -153,7 +147,7 @@ if __name__ == "__main__":
                     alive_new.append(p)
         processes = alive_new
 
-        # Расчет целевой нагрузки ТОЛЬКО по Москве
+        # Расчет целевой нагрузки ПО МОСКОВСКОМУ ВРЕМЕНИ
         current_hour = get_moscow_hour()
         
         if current_hour != last_logged_hour:
@@ -163,12 +157,9 @@ if __name__ == "__main__":
 
         factor = get_current_hour_factor()
         
-        # ВАША ЛОГИКА ИЗ КОДА 1: 
-        # Общее число слушателей берется из длины списка RADIOS (с учетом дублей!)
+        # Ваша логика из Кода 1: берем длину списка RADIOS (с учетом дублей!)
         target_total = int(len(RADIOS) * factor)
         
-        # Распределение ровно такое же, как в вашем первом сообщении:
-        # просто берем срез от перемешанного списка нужного размера
         pool = RADIOS.copy()
         random.shuffle(pool)
         pool = pool[:target_total]
