@@ -1,13 +1,11 @@
 import socket
 import time
-from urllib.parse import urlparse # Для правильной работы с URL
-from multiprocessing import Process
+from urllib.parse import urlparse
+from multiprocessing import Process, current_process
 import random
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone
 
-
-# Глобальные настройки (твои текущие)
+# Глобальные настройки потоков (сумма = пик в 40 слушателей)
 RADIOS = [
     *(['https://listen7.myradio24.com/sintezi'] * 20),
     *(['https://listen7.myradio24.com/rockataka'] * 5), 
@@ -15,42 +13,42 @@ RADIOS = [
     *(['https://listen7.myradio24.com/nevermind'] * 10)
 ]
 REFERER_URL = "https://radio.art-test-1.store"
-SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин
-SESSION_DURATION_MAX = 1600  # Максимум ~27 минут
-READ_TIMEOUT_SEC = 5        # Ключевое изменение!
-MOSCOW_TZ = ZoneInfo("Europe/Moscow") # ⚡️ Добавлено для московского времени
+SESSION_DURATION_MIN = 100   
+SESSION_DURATION_MAX = 1600  
+READ_TIMEOUT_SEC = 5        
 
-#### НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
+#### ⚡️ НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
 PLATFORM_WEIGHTS = [  
-    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
+    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},
     {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
-    
-    # Мобильная аудитория (большинство пользователей)
     {"os": "Android", "version": "13", "arch": "SM-S901B", "weight": 0.3},
     {"os": "iPhone", "version": "16_6", "model": "iPhone14,2", "weight": 0.2},
-    
-    # Другие десктопы
     {"os": "Linux", "version": "x86_64", "weight": 0.05},
     {"os": "X11", "version": "Ubuntu; Linux x86_64", "weight": 0.05}
 ]
 
 BROWSER_WEIGHTS = [  
-    {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},  
+    {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},
     {"name": "Firefox", "version": "121.0", "weight": 0.2},
     {"name": "Safari", "version": "605.1.15", "weight": 0.1},
     {"name": "Edge", "version": "120.0.2210.57", "weight": 0.05},
     {"name": "Opera", "version": "98.0.4825.16", "weight": 0.05}
 ]
 
-#### СУТОЧНЫЙ ПРОФИЛЬ НАГРУЗКИ ####
-HOURLY_LOAD = {
-    "00": 0.35, "01": 0.30, "02": 0.25, "03": 0.22, "04": 0.25, "05": 0.35,
-    "06": 0.55, "07": 0.85, "08": 0.98, "09": 0.92, "10": 0.80, "11": 0.75,
-    "12": 0.78, "13": 0.76, "14": 0.74, "15": 0.77, "16": 0.82, "17": 0.90,
-    "18": 1.00, "19": 0.88, "20": 0.75, "21": 0.65, "22": 0.50, "23": 0.40
+# --- ПАРАМЕТРЫ УПРАВЛЕНИЯ ПО ВРЕМЕНИ ---
+BASE_LISTENERS = len(RADIOS)  # Максимальное число слушателей в пик (40)
+CHECK_INTERVAL_SEC = 300       # Как часто проверять расписание (раз в 5 минут)
+GRACEFUL_STOP_DELAY = 120     # Задержка перед принудительным убийством процесса (сек)
+
+# Ваша таблица активности, нормализованная под BASE_LISTENERS (пик 40 человек в 15:00 UTC)
+TARGET_LISTENERS_BY_HOUR = {
+    0: 8, 1: 10, 2: 14, 3: 22, 4: 34, 5: 39, 6: 36, 7: 32,
+    8: 30, 9: 31, 10: 30, 11: 29, 12: 30, 13: 32, 14: 36, 15: 40,
+    16: 35, 17: 30, 18: 26, 19: 20, 20: 16, 21: 14, 22: 12, 23: 10
 }
 
 def generate_user_agent():
+    """Генерирует реалистичный User-Agent."""
     total_weight_platforms = sum(item["weight"] for item in PLATFORM_WEIGHTS)
     choice = random.uniform(0, total_weight_platforms)
     current_weight = 0
@@ -79,22 +77,23 @@ def generate_user_agent():
     
     return ua_template.strip()
 
-
 def keep_radio_alive(url):
+    """
+    Функция отдельного слушателя.
+    Поддерживает соединение активным случайное время от SESSION_DURATION_MIN до MAX.
+    """
     parsed_url = urlparse(url)
     host = parsed_url.netloc.split(':')[0] 
-    path = parsed_path = parsed_url.path or '/'
+    path = parsed_url.path  
 
     headers = (
         f"GET {path} HTTP/1.1\r\n"
         f"Host: {host}\r\n"
-        
-        #### КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: генерируем сложный UA ###
         f"Icy-MetaData: 1\r\n"
         f"User-Agent: {generate_user_agent()}\r\n"
-        
         f"Referer: {REFERER_URL}\r\n"
-        f"Connection: Keep-Alive\r\r"
+        f"Connection: Keep-Alive\r\n"
+        "\r\n"
     )
 
     while True:  
@@ -102,8 +101,9 @@ def keep_radio_alive(url):
         
         try:
             with socket.create_connection((host, 80)) as sock:
-                # 🔥 ВАЖНО! Мы убираем явные таймауты чтения.
-                # Сокет будет жить вечно до наступления нашего лимита.
+                sock.settimeout(READ_TIMEOUT_SEC)
+                sock.sendall(headers.encode())
+                
                 response_headers = b""
                 while True:
                     chunk = sock.recv(4096)
@@ -112,90 +112,97 @@ def keep_radio_alive(url):
                     response_headers += chunk
 
                 start_time = time.time()
+                proc_name = current_process().name
 
-                #### ОПТИМИЗАЦИЯ ПОД ОБЛАЧНЫЕ СЕРВЕРЫ ####
-                finish_time = start_time + session_duration # Жёсткий лимит
-
-                # 🔥 ЗДЕСЬ ВСЁ РАБОТАЕТ ТАК ЖЕ, КАК В КОДЕ 1.
-                # Мы читаем данные бесконечно долго, пока не наступит наше время смерти.
-                # Если сервер присылает пустые пакеты или разрывает соединение,
-                # цикл всё равно продолжит работу до момента `finish_time`.
-                while int(time.time()) < finish_time:
+                while int(time.time() - start_time) < session_duration:
                     try:
-                        data = sock.recv(1024)
-                        
-                        # Пустой пакет данных — это нормально.
-                        # Продолжаем слушать, чтобы поддерживать сессию живой.
-                        if not data:
-                            continue
-                            
+                        sock.recv(1024)
+                    except socket.timeout:
+                        pass
                     except Exception as e:
-                        print(f"[{time.strftime('%H:%M:%S')}] Read error for {url}: {e}")
+                        print(f"[{time.strftime('%H:%M:%S')}] [{proc_name}] Read error for {url}: {e}")
                         break
 
         except Exception as e:
-            print(f"[{time.strftime('%H:%M:%S')}] Connection error for {url}: {e}. Reconnecting...")
+            print(f"[{time.strftime('%H:%M:%S')}] [{current_process().name}] Connection error for {url}: {e}. Reconnecting...")
         
         finally:
             elapsed = int(time.time() - start_time)
             mins, secs = divmod(elapsed, 60)
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
+def get_target_listeners_for_now():
+    """Получает целевое число слушателей для текущего часа по UTC"""
+    utc_hour = datetime.now(timezone.utc).hour
+    return TARGET_LISTENERS_BY_HOUR[utc_hour]
 
-def get_moscow_hour():
-    """Возвращает текущее московское время."""
-    return datetime.now(MOSCOW_TZ).strftime("%H")
-
-def get_current_hour_factor():
-    hour_str = get_moscow_hour()
-    return HOURLY_LOAD[hour_str]
-
+def scheduler_manager(active_processes, target_count):
+    """
+    Управляет пулом процессов: добирает или убирает слушателей до нужного числа.
+    При сокращении пула убивает самые старые процессы.
+    """
+    current_count = len(active_processes)
+    
+    # Если нужно больше слушателей
+    if current_count < target_count:
+        to_spawn = target_count - current_count
+        urls_pool = RADIOS.copy()
+        random.shuffle(urls_pool)
+        
+        for i in range(to_spawn):
+            radio_url = urls_pool[i % len(urls_pool)]
+            p = Process(target=keep_radio_alive, args=(radio_url,))
+            p.start()
+            active_processes.append(p)
+            print(f"[MANAGER] Spawned listener #{len(active_processes)} -> {radio_url}")
+            
+    # Если нужно меньше слушателей
+    elif current_count > target_count:
+        to_stop = current_count - target_count
+        
+        # Агрессивно завершаем лишние процессы (самые старые в списке)
+        processes_to_kill = active_processes[:to_stop]
+        remaining_processes = active_processes[to_stop:]
+        
+        for p in processes_to_kill:
+            if p.is_alive():
+                p.terminate()
+                p.join(timeout=GRACEFUL_STOP_DELAY)
+                if p.is_alive():
+                    p.kill()
+        
+        active_processes.clear()
+        active_processes.extend(remaining_processes)
+        print(f"[MANAGER] Reduced pool to {len(active_processes)} listeners")
 
 if __name__ == "__main__":
-    processes = []
-    last_logged_hour = None
+    manager_active = []
+    
+    # Первоначальный запуск на текущее значение по UTC
+    initial_target = get_target_listeners_for_now()
+    print(f"[INIT] Starting at {initial_target} listeners based on current UTC hour.")
+    scheduler_manager(manager_active, initial_target)
 
-    # 🔹 ЭТО ОРИГИНАЛЬНАЯ ЛОГИКА ИЗ КОДА 1.
-    # Она работает идеально несколько дней.
-    # Мы добавляем только проверку смены часа по Москве.
+    try:
+        while True:
+            time.sleep(CHECK_INTERVAL_SEC)  # Спит 5 минут (300 сек)
+            
+            new_target = get_target_listeners_for_now()
+            # Очищаем список от завершившихся естественным путем процессов
+            alive_processes = [p for p in manager_active if p.is_alive()]
+            current_live = len(alive_processes)
+            manager_active = alive_processes
+            
+            if current_live != new_target:
+                timestamp = time.strftime('%H:%M:%S')
+                print(f"[{timestamp}] Schedule change detected. Target: {new_target}, Live: {current_live}. Adjusting...")
+                scheduler_manager(manager_active, new_target)
 
-    while True:
-        # Мягкая остановка старых процессов (как было в Коде 1).
-        alive_new = []
-        for p in processes:
+    except KeyboardInterrupt:
+        print("\n[MAIN] Shutdown signal received. Terminating all processes...")
+        for p in manager_active:
             if p.is_alive():
-                # Убиваем только те процессы, которые уже прожили более минуты.
-                # Это защищает нас от накопления зомби-процессов.
-                if time.time() - p._start_time > 60:
-                    p.terminate()
-                    p.join()
-                else:
-                    alive_new.append(p)
-        processes = alive_new
-
-        # Расчет целевой нагрузки строго по МОСКВЕ.
-        factor = get_current_hour_factor()
-
-        # 🔸 ВАША ОРИГИНАЛЬНАЯ ЛОГИКА РАСПРЕДЕЛЕНИЯ.
-        target_total = int(len(RADIOS) * factor)
-
-        pool = RADIOS.copy()
-        random.shuffle(pool)
-        pool = pool[:target_total]
-
-        needed = len(pool) - len(processes)
-        
-        # Запуск новых слушателей точно так же, как в Коде 1.
-        if needed > 0:
-            urls_to_start = pool[len(processes):]
-            for url in urls_to_start:
-                p = Process(target=keep_radio_alive, args=(url,))
-                p._start_time = time.time()
-                p.start()
-                processes.append(p)
-        
-        # 🎯 ФУНДАМЕНТАЛЬНОЕ ИСПРАВЛЕНИЕ.
-        # Ваш скрипт работал стабильно, потому что этот интервал был БОЛЬШИМ.
-        # Маленький интервал (например, 1 секунда) мог приводить к перезапускам.
-        # Оставляем его таким же большим, как в оригинале.
-        time.sleep(600) # Можно увеличить до 300 (5 минут) для стабильности.
+                p.terminate()
+                p.join(timeout=5)
+                if p.is_alive():
+                    p.kill()
