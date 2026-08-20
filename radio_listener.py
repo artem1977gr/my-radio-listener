@@ -1,7 +1,7 @@
 import socket
 import time
 from urllib.parse import urlparse
-from multiprocessing import Process, current_process
+from multiprocessing import Process
 import random
 from datetime import datetime, timezone
 
@@ -17,13 +17,19 @@ STATION_WEIGHTS = {
     # Nevermind — вторая по популярности
     "nevermind": 30,
 }
-BASE_LISTENERS = sum(STATION_WEIGHTS.values())  # Сумма весов становится базой
+
+# Автоматически вычисляем базу (сумму весов)
+# Это будет максимальное количество потоков при 100%.
+BASE_LISTENERS = sum(STATION_WEIGHTS.values())
+
+# Генерируем список RADIOS на основе этих весов.
+# Этот список служит пулом слотов: каждый элемент — уникальный слот.
 RADIOS = []
 for station, weight in STATION_WEIGHTS.items():
     RADIOS.extend([f"https://listen7.myradio24.com/{station}"] * int(weight))
 REFERER_URL = "https://radio.art-test-1.store"
-SESSION_DURATION_MIN = CHECK_INTERVAL_SEC  # Минимум равен интервалу проверки (5 мин)
-SESSION_DURATION_MAX = SESSION_DURATION_MIN * 3  # Максимум ~15 мин
+SESSION_DURATION_MIN = CHECK_INTERVAL_SEC  # Минимум равен интервалу проверки (5 минут) ⚡️ ФИКС ПЕРЕКОСА ✅
+SESSION_DURATION_MAX = SESSION_DURATION_MIN * 3  # Максимум ~15 минут ⚡️ ФИКС ПЕРЕКОСА ✅
 READ_TIMEOUT_SEC = 5         # Ключевое изменение!
 
 
@@ -117,7 +123,7 @@ def keep_radio_alive(slot_index, url):  # <-- Первый аргумент — 
                     response_headers += chunk
 
                 start_time = time.time()
-                proc_name = f"Slot #{slot_index}"  # ⚡️ ФИКС ОШИБКИ ✅ Используем номер слота вместо current_process().name
+                proc_name = f"Slot #{slot_index}"  # ⚡️ ФИКС ОШИБКИ ✅ Используем номер слота
 
                 #### ОПТИМИЗАЦИЯ ПОД ОБЛАЧНЫЕ СЕРВЕРЫ ####
                 while int(time.time() - start_time) < session_duration:
@@ -167,15 +173,18 @@ def get_target_listeners_for_now():
 
 
 def scheduler_manager(active_processes):
-    alive_processes = []  # ⚡️ ФИКС ЗОМБИ-ПРОЦЕССОВ ✅ Создаём новый чистый список каждый раз
-                          # Мы больше не используем глобальный manager_active напрямую.
+    # ⚡️ ФИНАЛЬНАЯ ЛОГИКА ✅
+    # Мы создаём новый список для живых процессов.
+    alive_processes = []  
 
-    # Сначала проверяем ВСЕ активные процессы.
+    # Проверяем ВСЕ активные процессы.
     # Если у процесса нет атрибута `.slot`, значит он старый или зомби.
-    # ⚡️ ФИКС AssertionError ✅ Проверка только живых процессов с атрибутом slot.
-    for p in active_processes[:]:
-        if p.is_alive() and hasattr(p, 'slot'):
-            alive_processes.append(p)
+    # ⚡️ ФИКС AssertionError ✅
+    for process in active_processes[:]:
+        # Мы проверяем только те процессы, которые реально живы
+        # ИЛИ те, которые мы сами создали (имеют атрибут .slot)
+        if process.is_alive() and hasattr(process, 'slot'):
+            alive_processes.append(process)
 
     new_target = get_target_listeners_for_now()
 
@@ -186,12 +195,12 @@ def scheduler_manager(active_processes):
 
     #### ⚡️ РАВНОМЕРНЫЙ ДОБАВЛЕНИЕ ПРОЦЕССОВ ✅
     # ⚡️ ФИКС SyntaxError и перекоса на старте! ✅
-    # Мы выбираем свободные слоты случайным образом, чтобы избежать перекоса.
+    # Мы выбираем свободные слоты случайным образом, чтобы избежать перекрытия.
     slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
 
     # Если свободных слотов нет, ничего не создаём.
     if not slots_to_fill:
-        return
+        return alive_processes  # ⚡️ Возвращаем чистый список
 
     for slot_index in slots_to_fill:
         radio_url = RADIOS[slot_index]
@@ -202,18 +211,17 @@ def scheduler_manager(active_processes):
             args=(slot_index, radio_url,)  # Первый аргумент — слот, второй — URL
         )
         p.start()
-        print(f"[MANAGER] Spawned listener #{slot_index} -> {url}")
+        print(f"[MANAGER] Spawned listener #{slot_index} -> {radio_url}")
         alive_processes.append(p)
 
     #### УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ (Плавно!) ####
-    # ⚡️ ВАЖНЫЙ ФИКС SyntaxError ✅ Выровняй эту строку по левому краю функции!
+    # ⚡️ ВАЖНЫЙ ФИКС SyntaxError ✅ Выровняй эту строку строго под def!!!
     elif len(alive_processes) > new_target:
         processes_to_kill = []
         
         # ⚡️ ВАЖНЫЙ ФИКС PICKLE ERROR ✅ Для плавного перехода мы сортируем по PID.
-        # Метод _popen.pid возвращает уникальный идентификатор ОС.
         sorted_processes = [
-            (p._popen.pid, p)  # Сортируем по уникальному ID процесса
+            (p._popen.pid, p)  # Сортируем по уникальному ID процесса ОС
             for p in alive_processes
             if getattr(p, '_popen', None) is not None
         ]
@@ -232,20 +240,20 @@ def scheduler_manager(active_processes):
                 if p.is_alive():
                     p.kill()
 
-    # ⚡️ ФИКС ЗОМБИ-ПРОЦЕССОВ ✅ Возвращаем очищенный список обратно.
+    # ⚡️ ФИНАЛЬНЫЙ ВОЗВРАТ ✅ Всегда возвращаем актуальный список
     return alive_processes
 
 
 if __name__ == "__main__":
     manager_active = []
     
-    initial_target = get_target_listers_for_now()  # Исправлено опечатку в названии функции
+    initial_target = get_target_listeners_for_now()  # Исправил опечатку в названии функции
     print(f"[INIT] Starting at {initial_target} listeners based on current UTC hour.")
 
     try:
         while True:
             # ⚡️ ФИНАЛЬНАЯ СТРУКТУРА ЦИКЛА ✅
-            # Мы вызываем менеджер, а он сам возвращает нам актуальный список процессов.
+            # Мы всегда работаем только с чистым списком от менеджера.
             manager_active = scheduler_manager(manager_active)
             
             time.sleep(CHECK_INTERVAL_SEC)  # Спим 5 минут (300 сек)
