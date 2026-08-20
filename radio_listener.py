@@ -5,7 +5,8 @@ from multiprocessing import Process, current_process
 import random
 from datetime import datetime, timezone
 
-# Глобальные настройки потоков (сумма = пик в 40 слушателей )
+
+# Глобальные настройки потоков (сумма = пик)
 RADIOS = [
     *(['https://listen7.myradio24.com/sintezi'] * 20),
     *(['https://listen7.myradio24.com/rockataka'] * 5), 
@@ -13,42 +14,37 @@ RADIOS = [
     *(['https://listen7.myradio24.com/nevermind'] * 10)
 ]
 REFERER_URL = "https://radio.art-test-1.store"
-SESSION_DURATION_MIN = 100   
-SESSION_DURATION_MAX = 1600  
-READ_TIMEOUT_SEC = 5        
+SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин
+SESSION_DURATION_MAX = 1600  # Максимум ~27 минут
+READ_TIMEOUT_SEC = 5        # Ключевое изменение!
+
 
 #### ⚡️ НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
-PLATFORM_WEIGHTS = [  
-    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},
+PLATFORM_WEIGHTS = [  # Веса для платформ
+    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
     {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
+    
+    # Мобильная аудитория (большинство пользователей)
     {"os": "Android", "version": "13", "arch": "SM-S901B", "weight": 0.3},
     {"os": "iPhone", "version": "16_6", "model": "iPhone14,2", "weight": 0.2},
+    
+    # Другие десктопы
     {"os": "Linux", "version": "x86_64", "weight": 0.05},
     {"os": "X11", "version": "Ubuntu; Linux x86_64", "weight": 0.05}
 ]
 
-BROWSER_WEIGHTS = [  
-    {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},
+BROWSER_WEIGHTS = [  # Веса для браузеров
+    {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},  # Доминирует
     {"name": "Firefox", "version": "121.0", "weight": 0.2},
     {"name": "Safari", "version": "605.1.15", "weight": 0.1},
     {"name": "Edge", "version": "120.0.2210.57", "weight": 0.05},
     {"name": "Opera", "version": "98.0.4825.16", "weight": 0.05}
 ]
 
-# --- ПАРАМЕТРЫ УПРАВЛЕНИЯ ПО ВРЕМЕНИ ---
-BASE_LISTENERS = len(RADIOS)  # Максимальное число слушателей в пик (40)
-CHECK_INTERVAL_SEC = 300       # Как часто проверять расписание (раз в 5 минут)
-GRACEFUL_STOP_DELAY = 120     # Задержка перед принудительным убийством процесса (сек)
-
-# Ваша таблица активности, нормализованная под BASE_LISTENERS (пик 40 человек в 15:00 UTC)
-TARGET_LISTENERS_BY_HOUR = {
-    0: 8, 1: 10, 2: 14, 3: 22, 4: 34, 5: 39, 6: 36, 7: 32,
-    8: 30, 9: 31, 10: 30, 11: 29, 12: 30, 13: 32, 14: 36, 15: 40,
-    16: 35, 17: 30, 18: 26, 19: 20, 20: 16, 21: 14, 22: 12, 23: 10
-}
 
 def generate_user_agent():
     """Генерирует реалистичный User-Agent."""
+    #### ВЫБИРАЕМ ПЛАТФОРМУ ПО ВЕСАМ ####
     total_weight_platforms = sum(item["weight"] for item in PLATFORM_WEIGHTS)
     choice = random.uniform(0, total_weight_platforms)
     current_weight = 0
@@ -58,6 +54,7 @@ def generate_user_agent():
             platform_data = plat
             break
     
+    #### ВЫБИРАЕМ БРАУЗЕР ПО ВЕСАМ ####
     total_weight_browsers = sum(item["weight"] for item in BROWSER_WEIGHTS)
     choice = random.uniform(0, total_weight_browsers)
     current_weight = 0
@@ -67,6 +64,7 @@ def generate_user_agent():
             browser_data = brw
             break
     
+    #### СОБИРАЕМ СТРОКУ ####
     ua_template = (
         f"Mozilla/5.0 ({platform_data['os']} {platform_data.get('version', '')}; "
         f"{platform_data.get('arch', '')} {platform_data.get('model', '')}) "
@@ -77,11 +75,8 @@ def generate_user_agent():
     
     return ua_template.strip()
 
+
 def keep_radio_alive(url):
-    """
-    Функция отдельного слушателя.
-    Поддерживает соединение активным случайное время от SESSION_DURATION_MIN до MAX.
-    """
     parsed_url = urlparse(url)
     host = parsed_url.netloc.split(':')[0] 
     path = parsed_url.path  
@@ -89,8 +84,11 @@ def keep_radio_alive(url):
     headers = (
         f"GET {path} HTTP/1.1\r\n"
         f"Host: {host}\r\n"
+        
+        #### КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: генерируем сложный UA ###
         f"Icy-MetaData: 1\r\n"
         f"User-Agent: {generate_user_agent()}\r\n"
+        
         f"Referer: {REFERER_URL}\r\n"
         f"Connection: Keep-Alive\r\n"
         "\r\n"
@@ -101,7 +99,8 @@ def keep_radio_alive(url):
         
         try:
             with socket.create_connection((host, 80)) as sock:
-                sock.settimeout(READ_TIMEOUT_SEC)
+                sock.settimeout(READ_TIMEOUT_SEC)  # Чтение каждые 5 секунд
+
                 sock.sendall(headers.encode())
                 
                 response_headers = b""
@@ -114,6 +113,7 @@ def keep_radio_alive(url):
                 start_time = time.time()
                 proc_name = current_process().name
 
+                #### ОПТИМИЗАЦИЯ ПОД ОБЛАЧНЫЕ СЕРВЕРЫ ####
                 while int(time.time() - start_time) < session_duration:
                     try:
                         sock.recv(1024)
@@ -131,14 +131,34 @@ def keep_radio_alive(url):
             mins, secs = divmod(elapsed, 60)
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
+
+# --- НОВЫЕ ПАРАМЕТРЫ ДЛЯ УПРАВЛЕНИЯ ПО ВРЕМЕНИ ---
+CHECK_INTERVAL_SEC = 300       # Как часто проверять расписание (раз в 5 минут)
+GRACEFUL_STOP_DELAY = 120     # Задержка перед принудительным убийством процесса (сек)
+
+# 🔥 ВАЖНО! Здесь мы вычисляем BASE_LISTENERS динамически,
+# исходя из длины вашего списка RADIOS. Если вы измените количество адресов,
+# это значение изменится автоматически.
+BASE_LISTENERS = len(RADIOS)
+
+# Ваша таблица активности, нормализованная под BASE_LISTENERS
+# Пик — 40 человек в 15:00 UTC (или столько, сколько сейчас в вашем списке RADIOS)
+TARGET_LISTENERS_BY_HOUR = {
+    0: 8, 1: 10, 2: 14, 3: 22, 4: 34, 5: 39, 6: 36, 7: 32,
+    8: 30, 9: 31, 10: 30, 11: 29, 12: 30, 13: 32, 14: 36, 15: BASE_LISTENERS,
+    16: 35, 17: 30, 18: 26, 19: 20, 20: 16, 21: 14, 22: 12, 23: 10
+}
+
+
 def get_target_listeners_for_now():
     """Получает целевое число слушателей для текущего часа по UTC"""
     utc_hour = datetime.now(timezone.utc).hour
     return TARGET_LISTENERS_BY_HOUR[utc_hour]
 
+
 def scheduler_manager(active_processes, target_count):
     """
-    Управляет пулом процессов: добирает или убирает слушателей до нужного числа.
+    Управляет пулом процессов: добирает или убирает слушателеей до нужного числа.
     При сокращении пула убивает самые старые процессы.
     """
     current_count = len(active_processes)
@@ -174,6 +194,7 @@ def scheduler_manager(active_processes, target_count):
         active_processes.clear()
         active_processes.extend(remaining_processes)
         print(f"[MANAGER] Reduced pool to {len(active_processes)} listeners")
+
 
 if __name__ == "__main__":
     manager_active = []
