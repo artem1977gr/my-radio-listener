@@ -141,7 +141,6 @@ GRACEFUL_STOP_DELAY = 120     # Задержка перед принудител
 BASE_LISTENERS = len(RADIOS)
 
 # ✅ ТАБЛИЦА ПРОЦЕНТОВ ОТ MAXIMUM
-# Теперь каждый час выражен в процентах от текущей длины списка RADIOS.
 TARGET_PERCENT_BY_HOUR = {
     0: 22, 1: 25, 2: 35, 3: 55, 4: 85, 5: 98, 6: 92, 7: 80,
     8: 75, 9: 78, 10: 76, 11: 74, 12: 77, 13: 82, 14: 90, 15: 100,
@@ -161,8 +160,8 @@ def get_target_listeners_for_now():
 
 def scheduler_manager(active_processes):
     """
-    Управляет пулом процессов так, чтобы они были жестко привязаны к списку RADIOS.
-    Каждому процессу соответствует один конкретный URL-адрес.
+    Управляет пулом процессов плавно.
+    При переходе на меньший % убивает только лишние процессы, но не перераспределяет их сразу.
     """
     alive_processes = [p for p in active_processes if p.is_alive()]
 
@@ -175,11 +174,42 @@ def scheduler_manager(active_processes):
 
     current_live = len(alive_processes)
 
-    #### ДОБОР ПРОЦЕССОВ ####
+    #### УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ (Плавно!) ####
+    # Нам нужно оставить только нужное количество процессов.
+    # Но мы НЕ будем перебрасывать их на другие станции.
+    # Просто оставим самых молодых, а старых удалим.
+    processes_to_kill = []
+
+    # Сначала сортируем процессы по времени старта (самые старые первыми)
+    sorted_processes = sorted(
+        [(process.start(), process) for process in alive_processes],
+        key=lambda x: x[0],  # Время старта
+        reverse=True          # Самые старые идут первыми
+    )
+
+    # Берём только ссылки на объекты процессов
+    sorted_processes = [item[1] for item in sorted_processes]
+
+    # Оставляем первых N процессов, где N = target_count
+    alive_processes = sorted_processes[:target_count]
+
+    # Все остальные должны быть закрыты
+    processes_to_kill = sorted_processes[target_count:]
+
+    for p in processes_to_kill:
+        if p.is_alive():
+            p.terminate()
+            p.join(timeout=GRACEFUL_STOP_DELAY)
+            if p.is_alive():
+                p.kill()
+
+    #### ДОБОР ПРОЦЕССОВ (Переход с меньшего % на больший) ####
     free_slots = set(range(len(RADIOS))) - {active_processes.index(p) for p in alive_processes}
     to_spawn = target_count - current_live
 
-    # Жестко привязываем новые процессы к свободным слотам
+    # Запускаем новые процессы в случайные свободные слоты
+    # Так как мы убивали только лишние, а не перераспределяли,
+    # то здесь просто заполняем пустоты.
     if to_spawn > 0 and free_slots:
         slots_to_fill = list(free_slots)[:to_spawn]
         for slot_index in slots_to_fill:
@@ -189,25 +219,6 @@ def scheduler_manager(active_processes):
             # Важно вставить новый процесс именно в его слот
             alive_processes.insert(slot_index, p)
             print(f"[MANAGER] Spawned listener #{slot_index} -> {radio_url}")
-
-    #### УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ ####
-    elif current_live > target_count:
-        processes_to_kill = []
-        # Сначала пытаемся убить самые старые процессы (с большими индексами)
-        for i, p in enumerate(reversed(alive_processes)):
-            if len(processes_to_kill) >= current_live - target_count:
-                break
-            processes_to_kill.append(p)
-
-        for p in processes_to_kill:
-            if p.is_alive():
-                p.terminate()
-                p.join(timeout=GRACEFUL_STOP_DELAY)
-                if p.is_alive():
-                    p.kill()
-
-        # Удаляем убитые процессы из списка
-        alive_processes = [p for p in alive_processes if p not in processes_to_kill]
 
     manager_active.clear()
     manager_active.extend(alive_processes)
