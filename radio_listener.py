@@ -1,6 +1,6 @@
 import socket
 import time
-from urllib.parse import urlparse # Для правильной работы с URL
+from urllib.parse import urlparse
 from multiprocessing import Process
 import random
 from datetime import datetime
@@ -17,10 +17,10 @@ RADIOS = [
 REFERER_URL = "https://radio.art-test-1.store"
 SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин
 SESSION_DURATION_MAX = 1600  # Максимум ~27 минут
-MOSCOW_TZ = ZoneInfo("Europe/Moscow") # ⚡️ Изменение 1: Таймзона
+MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
 #### ⚡️ НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
-PLATFORM_WEIGHTS = [  # Веса для платформ
+PLATFORM_WEIGHTS = [  
     {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
     {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
     
@@ -33,7 +33,7 @@ PLATFORM_WEIGHTS = [  # Веса для платформ
     {"os": "X11", "version": "Ubuntu; Linux x86_64", "weight": 0.05}
 ]
 
-BROWSER_WEIGHTS = [  # Веса для браузеров
+BROWSER_WEIGHTS = [  
     {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},  
     {"name": "Firefox", "version": "121.0", "weight": 0.2},
     {"name": "Safari", "version": "605.1.15", "weight": 0.1},
@@ -49,8 +49,8 @@ HOURLY_LOAD = {
     "18": 1.00, "19": 0.88, "20": 0.75, "21": 0.65, "22": 0.50, "23": 0.40
 }
 
+
 def generate_user_agent():
-    """Генерирует реалистичный User-Agent."""
     total_weight_platforms = sum(item["weight"] for item in PLATFORM_WEIGHTS)
     choice = random.uniform(0, total_weight_platforms)
     current_weight = 0
@@ -83,7 +83,7 @@ def generate_user_agent():
 def keep_radio_alive(url):
     parsed_url = urlparse(url)
     host = parsed_url.netloc.split(':')[0] 
-    path = parsed_url.path  
+    path = parsed_path = parsed_url.path or '/'
 
     headers = (
         f"GET {path} HTTP/1.1\r\n"
@@ -103,10 +103,8 @@ def keep_radio_alive(url):
         
         try:
             with socket.create_connection((host, 80)) as sock:
-                # ⚡️ Изменение 2: Убираем явный таймаут чтения!
-                # Это позволяет нам держать соединение открытым бесконечно долго.
-                # Мы будем контролировать время жизни процесса через системные часы.
-                
+                # 🔥 ФИКС: Убираем явный таймаут чтения!
+                # Теперь сокет будет ждать данные вечно, пока сессия активна.
                 response_headers = b""
                 while True:
                     chunk = sock.recv(4096)
@@ -119,10 +117,9 @@ def keep_radio_alive(url):
                 #### ОПТИМИЗАЦИЯ ПОД ОБЛАЧНЫЕ СЕРВЕРЫ ####
                 finish_time = start_time + session_duration # Жёсткий лимит на закрытие
 
-                # 🔥 Ключевое изменение здесь! 🔥
-                # Мы больше не используем таймауты сокета для завершения цикла.
-                # Вместо этого мы читаем данные БЕЗ ЛИМИТА по времени,
-                # а принудительно завершаем цикл только когда наступит финишное время.
+                # 🔥 ФИКС: Читаем данные БЕЗ ЛИМИТА по времени.
+                # Продолжаем слушать поток, даже если там тишина.
+                # Это важно для поддержания сессии на стороне сервера.
                 while int(time.time()) < finish_time:
                     try:
                         data = sock.recv(1024)
@@ -156,12 +153,16 @@ def get_current_hour_factor():
 if __name__ == "__main__":
     processes = []
     last_logged_hour = None
-    
+
     while True:
-        # Очистка завершившихся процессов (как в Коде 1 + проверка возраста)
+        # 🔥 ФИКС: Мягкая остановка старых процессов.
+        # Удаляем все процессы, которые старше 1 минуты.
+        # Это защитит нас от накопления "зомби"-процессов при смене часа.
         alive_new = []
         for p in processes:
             if p.is_alive():
+                # Если процесс живёт более 60 секунд вне пула задач,
+                # значит, он остался от прошлого часа или вообще лишняя сущность.
                 if time.time() - p._start_time > 60:
                     p.terminate()
                     p.join()
@@ -169,7 +170,7 @@ if __name__ == "__main__":
                     alive_new.append(p)
         processes = alive_new
 
-        # Расчет целевой нагрузки ТОЛЬКО по Москве (исправление таймзоны)
+        # Расчет целевой нагрузки ТОЛЬКО по Москве
         current_hour = get_moscow_hour()
         
         if current_hour != last_logged_hour:
@@ -179,21 +180,29 @@ if __name__ == "__main__":
 
         factor = get_current_hour_factor()
         
-        # ВАША ЛОГИКА ИЗ КОДА 1: строго один процесс на каждую запись в списке RADIOS
+        # ВАША ЛОГИКА ИЗ КОДА 1: берем длину списка RADIOS (с учетом дублей!)
         target_total = int(len(RADIOS) * factor)
         
+        # Создаём пул задач строго нужного размера.
+        # ПРИМЕЧАНИЕ: Здесь используется простая логика перемешивания.
+        # Для точного распределения по весам можно использовать Counter(),
+        # но это сохранит вашу оригинальную логику.
         pool = RADIOS.copy()
         random.shuffle(pool)
         pool = pool[:target_total]
 
-        needed = len(pool) - len(processes)
+        # 🔥 ФИКС: Вычисляем разницу между целевым числом и живыми процессами.
+        # Нужно запустить только то, чего не хватает.
+        needed = max(target_total - len(processes), 0)
         
         if needed > 0:
-            urls_to_start = pool[len(processes):]
+            urls_to_start = pool[len(processes):len(processes)+needed]
             for url in urls_to_start:
                 p = Process(target=keep_radio_alive, args=(url,))
                 p._start_time = time.time()
                 p.start()
                 processes.append(p)
         
+        # Дайте процессу время поработать хотя бы минуту перед следующей проверкой.
+        # Иначе бесконечный цикл может создавать ненужные колебания.
         time.sleep(60)
