@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 from multiprocessing import Process
 import random
 from collections import Counter
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 # Глобальные настройки (ЕДИНСТВЕННЫЙ источник данных)
@@ -19,7 +20,7 @@ SESSION_DURATION_MAX = 1600
 READ_TIMEOUT_SEC = 5        
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
-#### НАСТРОЙКИ USER-AGENT'ОВ ###
+#### НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
 PLATFORM_WEIGHTS = [  
     {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
     {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
@@ -111,10 +112,12 @@ def keep_radio_alive(url):
                     except socket.timeout:
                         pass
                     except Exception as e:
+                        # Время ошибок остается системным (без привязки к MSK)
                         print(f"[{time.strftime('%H:%M:%S')}] Read error for {url}: {e}")
                         break
 
         except Exception as e:
+            # Время ошибок остается системным (без привязки к MSK)
             print(f"[{time.strftime('%H:%M:%S')}] Connection error for {url}: {e}. Reconnecting...")
         
         finally:
@@ -124,7 +127,9 @@ def keep_radio_alive(url):
 
 
 def get_moscow_hour():
-    return time.strftime("%H", time.localtime(), tz=MOSCOW_TZ)
+    """Возвращает текущий час строкой ('00'-'23') именно по Москве."""
+    # Исправлено для совместимости со старыми версиями Python
+    return datetime.now(MOSCOW_TZ).strftime("%H")
 
 
 def get_current_hour_factor():
@@ -135,23 +140,21 @@ def get_current_hour_factor():
 def build_target_pool(target_total, source_list):
     """
     Вычисляет абсолютные веса из списка RADIOS и собирает целевой пул процессов.
-    Теперь это единая точка входа для всех расчетов.
+    Изменение количества станций или их 'звездочек' меняет результат автоматически.
     """
     pool = []
     counts = Counter(source_list)
     unique_urls = list(dict.fromkeys(source_list)) # Сохраняем порядок первого появления
     
-    # Базовые квоты соответствуют количеству упоминаний в RADIOS
     base_quotas = dict(counts)
     
-    # Если нам нужно меньше процессов, чем сумма всех квот, пропорционально уменьшаем
+    # Если нужно меньше процессов, чем сумма всех квот, пропорционально уменьшаем
     if target_total < sum(base_quotas.values()):
         temp_pool = []
         for url in unique_urls:
             share = round(target_total * (base_quotas[url] / sum(base_quotas.values())))
             temp_pool.extend([url] * share)
         
-        # Корректировка округления
         diff = target_total - len(temp_pool)
         if diff > 0:
             for _ in range(diff):
@@ -181,7 +184,7 @@ if __name__ == "__main__":
     last_logged_hour = None
     
     while True:
-        # Мягкая остановка старых процессов
+        # Мягкая остановка старых процессов (старше 1 минуты)
         alive_new = []
         for p in processes:
             if p.is_alive():
@@ -192,10 +195,11 @@ if __name__ == "__main__":
                     alive_new.append(p)
         processes = alive_new
 
-        # Расчет нагрузки по Москве
+        # Расчет нагрузки ПО МОСКОВСКОМУ ВРЕМЕНИ
         current_hour = get_moscow_hour()
+        
         if current_hour != last_logged_hour:
-            full_time = time.strftime('%H:%M:%S', time.localtime(), tz=MOSCOW_TZ)
+            full_time = datetime.now(MOSCOW_TZ).strftime('%H:%M:%S')
             print(f"[{full_time}] Hour changed to {current_hour}:00 (MSK). Adjusting load...")
             last_logged_hour = current_hour
 
