@@ -20,7 +20,7 @@ READ_TIMEOUT_SEC = 5        # Ключевое изменение!
 
 
 #### ⚡️ НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
-PLATFORM_WEIGHTS = [  # Веса для платформ
+PLATFORM_WEIGHTS = [  
     {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
     {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
     
@@ -33,7 +33,7 @@ PLATFORM_WEIGHTS = [  # Веса для платформ
     {"os": "X11", "version": "Ubuntu; Linux x86_64", "weight": 0.05}
 ]
 
-BROWSER_WEIGHTS = [  # Веса для браузеров
+BROWSER_WEIGHTS = [  
     {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},  # Доминирует
     {"name": "Firefox", "version": "121.0", "weight": 0.2},
     {"name": "Safari", "version": "605.1.15", "weight": 0.1},
@@ -142,7 +142,6 @@ GRACEFUL_STOP_DELAY = 120     # Задержка перед принудител
 BASE_LISTENERS = len(RADIOS)
 
 # Ваша таблица активности, нормализованная под BASE_LISTENERS
-# Пик — 40 человек в 15:00 UTC (или столько, сколько сейчас в вашем списке RADIOS)
 TARGET_LISTENERS_BY_HOUR = {
     0: 8, 1: 10, 2: 14, 3: 22, 4: 34, 5: 39, 6: 36, 7: 32,
     8: 30, 9: 31, 10: 30, 11: 29, 12: 30, 13: 32, 14: 36, 15: BASE_LISTENERS,
@@ -156,44 +155,64 @@ def get_target_listeners_for_now():
     return TARGET_LISTENERS_BY_HOUR[utc_hour]
 
 
-def scheduler_manager(active_processes, target_count):
+def scheduler_manager(active_processes):
     """
-    Управляет пулом процессов: добирает или убирает слушателеей до нужного числа.
-    При сокращении пула убивает самые старые процессы.
+    Управляет пулом процессов на основе свободных слотов.
+    Каждый элемент списка RADIOS становится уникальным "слотом".
     """
-    current_count = len(active_processes)
-    
-    # Если нужно больше слушателей
-    if current_count < target_count:
-        to_spawn = target_count - current_count
-        urls_pool = RADIOS.copy()
-        random.shuffle(urls_pool)
-        
-        for i in range(to_spawn):
-            radio_url = urls_pool[i % len(urls_pool)]
+    # Очистка зомби-процессов
+    alive_processes = [p for p in active_processes if p.is_alive()]
+
+    # Текущее время по UTC
+    utc_hour = datetime.now(timezone.utc).hour
+    target_count = TARGET_LISTENERS_BY_HOUR[utc_hour]
+
+    # Мы ограничиваем целевую цифру длиной нашего списка URL
+    max_possible_listeners = len(RADIOS)
+    target_count = min(target_count, max_possible_listeners)
+
+    # Проверяем текущее состояние
+    current_live = len(alive_processes)
+
+    #### ДОБОР ПРОЦЕССОВ ####
+    # Нам нужно столько же процессов, сколько указано в графике, но не больше длины списка
+    free_slots = set(range(len(RADIOS)))  # Все возможные слоты
+    occupied_slots = {active_processes.index(p) for p in alive_processes}  # Занятые слоты
+    free_slots -= occupied_slots  # Оставшиеся свободные слоты
+
+    to_spawn = target_count - current_live
+    if to_spawn > 0 and free_slots:
+        # Запускаем новые процессы в случайные свободные слоты
+        slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
+        for slot_index in slots_to_fill:
+            radio_url = RADIOS[slot_index]
             p = Process(target=keep_radio_alive, args=(radio_url,))
             p.start()
-            active_processes.append(p)
-            print(f"[MANAGER] Spawned listener #{len(active_processes)} -> {radio_url}")
-            
-    # Если нужно меньше слушателей
-    elif current_count > target_count:
-        to_stop = current_count - target_count
-        
-        # Агрессивно завершаем лишние процессы (самые старые в списке)
-        processes_to_kill = active_processes[:to_stop]
-        remaining_processes = active_processes[to_stop:]
-        
+            # Важно вставить новый процесс в его слот, чтобы сохранить порядок
+            alive_processes.insert(slot_index, p)
+            print(f"[MANAGER] Spawned listener #{slot_index} -> {radio_url}")
+
+    #### УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ ####
+    elif current_live > target_count:
+        processes_to_kill = []
+        # Сначала пытаемся убить самые старые процессы (с большими индексами)
+        for i, p in enumerate(reversed(alive_processes)):
+            if len(processes_to_kill) >= current_live - target_count:
+                break
+            processes_to_kill.append(p)
+
         for p in processes_to_kill:
             if p.is_alive():
                 p.terminate()
                 p.join(timeout=GRACEFUL_STOP_DELAY)
                 if p.is_alive():
                     p.kill()
-        
-        active_processes.clear()
-        active_processes.extend(remaining_processes)
-        print(f"[MANAGER] Reduced pool to {len(active_processes)} listeners")
+
+        # Удаляем убитые процессы из списка
+        alive_processes = [p for p in alive_processes if p not in processes_to_kill]
+
+    manager_active.clear()
+    manager_active.extend(alive_processes)
 
 
 if __name__ == "__main__":
@@ -202,7 +221,7 @@ if __name__ == "__main__":
     # Первоначальный запуск на текущее значение по UTC
     initial_target = get_target_listeners_for_now()
     print(f"[INIT] Starting at {initial_target} listeners based on current UTC hour.")
-    scheduler_manager(manager_active, initial_target)
+    scheduler_manager(manager_active)
 
     try:
         while True:
@@ -217,7 +236,7 @@ if __name__ == "__main__":
             if current_live != new_target:
                 timestamp = time.strftime('%H:%M:%S')
                 print(f"[{timestamp}] Schedule change detected. Target: {new_target}, Live: {current_live}. Adjusting...")
-                scheduler_manager(manager_active, new_target)
+                scheduler_manager(manager_active)
 
     except KeyboardInterrupt:
         print("\n[MAIN] Shutdown signal received. Terminating all processes...")
