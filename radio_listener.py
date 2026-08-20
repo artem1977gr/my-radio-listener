@@ -106,29 +106,35 @@ def keep_radio_alive(url):
                     response_headers += chunk
 
                 start_time = time.time()
+
+                #### ОПТИМИЗАЦИЯ ПОД ОБЛАЧНЫЕ СЕРВЕРЫ ####
                 while int(time.time() - start_time) < session_duration:
                     try:
                         sock.recv(1024)
                     except socket.timeout:
                         pass
                     except Exception as e:
-                        # Время ошибок остается системным (без привязки к MSK)
+                        # Технический лог ошибок оставляем в системном времени сервера
                         print(f"[{time.strftime('%H:%M:%S')}] Read error for {url}: {e}")
                         break
 
         except Exception as e:
-            # Время ошибок остается системным (без привязки к MSK)
+            # Технический лог коннектов оставляем в системном времени сервера
             print(f"[{time.strftime('%H:%M:%S')}] Connection error for {url}: {e}. Reconnecting...")
         
         finally:
+            # ИСПРАВЛЕНО: расчет длительности сессии строго через time.time()
             elapsed = int(time.time() - start_time)
+            
+            # Форматируем вывод вручную, чтобы избежать проблем с часовыми поясами
             mins, secs = divmod(elapsed, 60)
+            
+            # Лог завершения сессии также в системном времени для точности таймера
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
 
 def get_moscow_hour():
     """Возвращает текущий час строкой ('00'-'23') именно по Москве."""
-    # ПОЛНОСТЬЮ ИСПРАВЛЕНО: используем только datetime
     return datetime.now(MOSCOW_TZ).strftime("%H")
 
 
@@ -138,6 +144,10 @@ def get_current_hour_factor():
 
 
 def build_target_pool(target_total, source_list):
+    """
+    Вычисляет абсолютные веса из списка RADIOS и собирает целевой пул процессов.
+    Изменение количества станций или их 'звездочек' меняет результат автоматически.
+    """
     pool = []
     counts = Counter(source_list)
     unique_urls = list(dict.fromkeys(source_list))
@@ -178,6 +188,7 @@ if __name__ == "__main__":
     last_logged_hour = None
     
     while True:
+        # Мягкая остановка старых процессов (старше 1 минуты)
         alive_new = []
         for p in processes:
             if p.is_alive():
@@ -197,8 +208,11 @@ if __name__ == "__main__":
             last_logged_hour = current_hour
 
         factor = get_current_hour_factor()
+        
+        # Целевое число берется от фактической длины вашего массива RADIOS
         target_total = int(len(RADIOS) * factor)
         
+        # Передаем весь список RADIOS как единый источник правды
         target_pool = build_target_pool(target_total, RADIOS)
 
         needed = len(target_pool) - len(processes)
