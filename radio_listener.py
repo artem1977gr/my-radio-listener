@@ -6,17 +6,28 @@ import random
 from datetime import datetime, timezone
 
 
-# Глобальные настройки потоков (сумма = пик)
-RADIOS = [
-    *(['https://listen7.myradio24.com/sintezi'] * 31),
-    *(['https://listen7.myradio24.com/rockataka'] * 8), 
-    *(['https://listen7.myradio24.com/iridium'] * 10),
-    *(['https://listen7.myradio24.com/nevermind'] * 30)
-]
+# ⚡️ ВАЖНЫЙ БЛОК ДЛЯ РУЧНОЙ НАСТРОЙКИ ⚡️
+# Здесь задаётся распределение на ПИКЕ (100%).
+# Это база для всех расчётов.
+STATION_WEIGHTS = {
+    "sintezi": 31,
+    "rockataka": 8,
+    "iridium": 7,
+    "nevermind": 30,
+}
+
+# Автоматически вычисляем базу (сумму весов)
+BASE_LISTENERS = sum(STATION_WEIGHTS.values())
+
+# Генерируем список RADIOS на основе этих весов.
+# Этот список используется как пул слотов: каждый элемент — уникальный слот.
+RADIOS = []
+for station, weight in STATION_WEIGHTS.items():
+    RADIOS.extend([f"https://listen7.myradio24.com/{station}"] * int(weight))
 REFERER_URL = "https://radio.art-test-1.store"
 SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин
 SESSION_DURATION_MAX = 1600  # Максимум ~27 минут
-READ_TIMEOUT_SEC = 5         # Ключевое изменение!
+READ_TIMEOUT_SEC = 5        # Ключевое изменение!
 
 
 #### ⚡️ НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
@@ -136,17 +147,22 @@ def keep_radio_alive(url):
 CHECK_INTERVAL_SEC = 300       # Как часто проверять расписание (раз в 5 минут)
 GRACEFUL_STOP_DELAY = 120     # Задержка перед принудительным убийством процесса (сек)
 
-# 🔥 ВАЖНО! Здесь мы вычисляем BASE_LISTENERS динамически,
-# исходя из длины вашего списка RADIOS. Если вы измените количество адресов,
-# это значение изменится автоматически.
-BASE_LISTENERS = len(RADIOS)
-
 # ✅ ТАБЛИЦА ПРОЦЕНТОВ ОТ MAXIMUM
 TARGET_PERCENT_BY_HOUR = {
     0: 22, 1: 25, 2: 35, 3: 55, 4: 85, 5: 98, 6: 92, 7: 80,
     8: 75, 9: 78, 10: 76, 11: 74, 12: 77, 13: 82, 14: 90, 15: 100,
     16: 88, 17: 75, 18: 65, 19: 50, 20: 40, 21: 35, 22: 30, 23: 25
 }
+
+
+class SlotProcess(Process):
+    """
+    Подкласс стандартного Process, который хранит информацию о своём слоте.
+    Это решает проблему смещения индексов при использовании .insert().
+    """
+    def __init__(self, slot_index, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
+        super().__init__(group=group, target=target, name=name, args=args, kwargs=kwargs, daemon=daemon)
+        self.slot = slot_index  # Сохраняем номер слота
 
 
 def get_target_listeners_for_now():
@@ -160,25 +176,7 @@ def get_target_listeners_for_now():
     return target_count
 
 
-# === ФИКС ОШИБКИ ===
-# Мы создаём новый класс, который хранит номер слота.
-# Теперь у него правильный конструктор.
-class SlotProcess(Process):
-    """
-    Подкласс стандартного Process, который хранит информацию о своём слоте.
-    Это решает проблему смещения индексов при использовании .insert().
-    """
-    def __init__(self, slot_index, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
-        # Вызываем родительский конструктор со всеми нужными аргументами.
-        super().__init__(group=group, target=target, name=name, args=args, kwargs=kwargs, daemon=daemon)
-        self.slot = slot_index  # Сохраняем номер слота
-
-
 def scheduler_manager(active_processes):
-    """
-    Управляет пулом процессов строго по списку RADIOS.
-    Каждый процесс имеет уникальный идентификатор своего URL-слота.
-    """
     alive_processes = [p for p in active_processes if p.is_alive()]
 
     # Текущее время по UTC
@@ -190,6 +188,20 @@ def scheduler_manager(active_processes):
 
     to_spawn = new_target - len(alive_processes)
 
+    #### ЖЁСТКИЙ ПЕРЕЗАПУСК ВСЕХ ПРОЦЕССОВ ПРИ СМЕНЕ ЧАСА (опционально) ####
+    # Если ты хочешь мгновенное перераспределение, раскомментируй этот блок.
+    # prev_utc_hour = None  # Добавь эту переменную здесь
+    # if current_live != new_target and utc_hour != prev_utc_hour:
+    #     processes_to_kill = alive_processes[:]
+    #     for p in processes_to_kill:
+    #         if p.is_alive():
+    #             p.terminate()
+    #             p.join(timeout=GRACEFUL_STOP_DELAY)
+    #             if p.is_alive():
+    #                 p.kill()
+    #     manager_active.clear()
+    # prev_utc_hour = utc_hour
+
     #### ДОБОР ПРОЦЕССОВ ####
     # Запускаем новые процессы в свободные слоты
     if to_spawn > 0 and free_slots:
@@ -198,8 +210,7 @@ def scheduler_manager(active_processes):
             radio_url = RADIOS[slot_index]
             
             # Создаём процесс с сохранением номера его слота
-            # Исправленная строка инициализации
-            p = SlotProcess(slot_index=slot_index, target=keep_radio_alive, args=(radio_url,))
+            p = SlotProcess(slot=slot_index, target=keep_radio_alive, args=(radio_url,))
             p.start()
             print(f"[MANAGER] Spawned listener #{slot_index} -> {radio_url}")
             alive_processes.append(p)  # Просто добавляем в конец списка
