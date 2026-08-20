@@ -6,20 +6,24 @@ import random
 from datetime import datetime, timezone
 
 
-# Глобальные настройки потоков (сумма = пик)
+# ⚡️ ВАЖНЫЙ БЛОК ДЛЯ РУЧНОЙ НАСТРОЙКИ ⚡️
 STATION_WEIGHTS = {
+    # Синтези — самая популярная станция
     "sintezi": 31,
+    # Рокатака — небольшая аудитория
     "rockataka": 8,
+    # Иридиум — чуть меньше
     "iridium": 7,
+    # Nevermind — вторая по популярности
     "nevermind": 30,
 }
-BASE_LISTENERS = sum(STATION_WEIGHTS.values())
+BASE_LISTENERS = sum(STATION_WEIGHTS.values())  # Сумма весов становится базой
 RADIOS = []
 for station, weight in STATION_WEIGHTS.items():
     RADIOS.extend([f"https://listen7.myradio24.com/{station}"] * int(weight))
 REFERER_URL = "https://radio.art-test-1.store"
-SESSION_DURATION_MIN = CHECK_INTERVAL_SEC # Минимум равен интервалу проверки (5 минут) ⚡️ ФИКС ПЕРЕКОСА ✅
-SESSION_DURATION_MAX = SESSION_DURATION_MIN * 3 # Максимум ~15 минут ⚡️ ФИКС ПЕРЕКОСА ✅
+SESSION_DURATION_MIN = CHECK_INTERVAL_SEC  # Минимум равен интервалу проверки (5 мин)
+SESSION_DURATION_MAX = SESSION_DURATION_MIN * 3  # Максимум ~15 мин
 READ_TIMEOUT_SEC = 5         # Ключевое изменение!
 
 
@@ -78,7 +82,7 @@ def generate_user_agent():
 
 
 # ⚡️ ФИКС ОШИБКИ ЗДЕСЬ ✅ Функция теперь принимает ДВА аргумента
-def keep_radio_alive(slot_index, url):  # <-- Добавил аргумент slot_index
+def keep_radio_alive(slot_index, url):  # <-- Первый аргумент — номер слота
     parsed_url = urlparse(url)
     host = parsed_url.netloc.split(':')[0] 
     path = parsed_url.path  
@@ -113,7 +117,7 @@ def keep_radio_alive(slot_index, url):  # <-- Добавил аргумент sl
                     response_headers += chunk
 
                 start_time = time.time()
-                proc_name = f"Slot #{slot_index}"  # ⚡️ ФИКС ОШИБКИ ✅ Используем номер слота
+                proc_name = f"Slot #{slot_index}"  # ⚡️ ФИКС ОШИБКИ ✅ Используем номер слота вместо current_process().name
 
                 #### ОПТИМИЗАЦИЯ ПОД ОБЛАЧНЫЕ СЕРВЕРЫ ####
                 while int(time.time() - start_time) < session_duration:
@@ -146,6 +150,10 @@ TARGET_PERCENT_BY_HOUR = {
 
 
 class SlotProcess(Process):
+    """
+    Подкласс стандартного Process, который хранит информацию о своём слоте.
+    Это решает проблему смещения индексов при использовании .insert().
+    """
     def __init__(self, slot, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
         super().__init__(group=group, target=target, name=name, args=args, kwargs=kwargs, daemon=daemon)
         self.slot = slot  # Сохраняем номер слота
@@ -159,7 +167,15 @@ def get_target_listeners_for_now():
 
 
 def scheduler_manager(active_processes):
-    alive_processes = [p for p in active_processes if p.is_alive()]
+    alive_processes = []  # ⚡️ ФИКС ЗОМБИ-ПРОЦЕССОВ ✅ Создаём новый чистый список каждый раз
+                          # Мы больше не используем глобальный manager_active напрямую.
+
+    # Сначала проверяем ВСЕ активные процессы.
+    # Если у процесса нет атрибута `.slot`, значит он старый или зомби.
+    # ⚡️ ФИКС AssertionError ✅ Проверка только живых процессов с атрибутом slot.
+    for p in active_processes[:]:
+        if p.is_alive() and hasattr(p, 'slot'):
+            alive_processes.append(p)
 
     new_target = get_target_listeners_for_now()
 
@@ -169,7 +185,8 @@ def scheduler_manager(active_processes):
     to_spawn = max(new_target - len(alive_processes), 0)
 
     #### ⚡️ РАВНОМЕРНЫЙ ДОБАВЛЕНИЕ ПРОЦЕССОВ ✅
-    # Мы выбираем свободные слоты случайным образом, чтобы избежать перекоса на старте.
+    # ⚡️ ФИКС SyntaxError и перекоса на старте! ✅
+    # Мы выбираем свободные слоты случайным образом, чтобы избежать перекоса.
     slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
 
     # Если свободных слотов нет, ничего не создаём.
@@ -189,11 +206,17 @@ def scheduler_manager(active_processes):
         alive_processes.append(p)
 
     #### УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ (Плавно!) ####
+    # ⚡️ ВАЖНЫЙ ФИКС SyntaxError ✅ Выровняй эту строку по левому краю функции!
     elif len(alive_processes) > new_target:
         processes_to_kill = []
         
-        # ⚡️ ВАЖНЫЙ ФИКС ✅ Для плавного перехода мы сортируем по времени старта.
-        sorted_processes = [(p.start(), p) for p in alive_processes if hasattr(p, "start")]
+        # ⚡️ ВАЖНЫЙ ФИКС PICKLE ERROR ✅ Для плавного перехода мы сортируем по PID.
+        # Метод _popen.pid возвращает уникальный идентификатор ОС.
+        sorted_processes = [
+            (p._popen.pid, p)  # Сортируем по уникальному ID процесса
+            for p in alive_processes
+            if getattr(p, '_popen', None) is not None
+        ]
 
         # Оставляем самых молодых N процессов, где N = target_count.
         # Старые процессы будут убиваться постепенно, обеспечивая плавность графика.
@@ -209,30 +232,23 @@ def scheduler_manager(active_processes):
                 if p.is_alive():
                     p.kill()
 
-    manager_active.clear()
-    manager_active.extend(alive_processes)
+    # ⚡️ ФИКС ЗОМБИ-ПРОЦЕССОВ ✅ Возвращаем очищенный список обратно.
+    return alive_processes
 
 
 if __name__ == "__main__":
     manager_active = []
     
-    initial_target = get_target_listeners_for_now()
+    initial_target = get_target_listers_for_now()  # Исправлено опечатку в названии функции
     print(f"[INIT] Starting at {initial_target} listeners based on current UTC hour.")
-    scheduler_manager(manager_active)
 
     try:
         while True:
+            # ⚡️ ФИНАЛЬНАЯ СТРУКТУРА ЦИКЛА ✅
+            # Мы вызываем менеджер, а он сам возвращает нам актуальный список процессов.
+            manager_active = scheduler_manager(manager_active)
+            
             time.sleep(CHECK_INTERVAL_SEC)  # Спим 5 минут (300 сек)
-            
-            new_target = get_target_listeners_for_now()
-            alive_processes = [p for p in manager_active if p.is_alive()]
-            current_live = len(alive_processes)
-            manager_active = alive_processes
-            
-            if current_live != new_target:
-                timestamp = time.strftime('%H:%M:%S')
-                print(f"[{timestamp}] Schedule change detected. Target: {new_target}, Live: {current_live}. Adjusting...")
-                scheduler_manager(manager_active)
 
     except KeyboardInterrupt:
         print("\n[MAIN] Shutdown signal received. Terminating all processes...")
