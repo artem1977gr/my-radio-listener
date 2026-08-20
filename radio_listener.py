@@ -18,8 +18,8 @@ RADIOS = []
 for station, weight in STATION_WEIGHTS.items():
     RADIOS.extend([f"https://listen7.myradio24.com/{station}"] * int(weight))
 REFERER_URL = "https://radio.art-test-1.store"
-SESSION_DURATION_MIN = 600   # Минимум ~10 минут (для плавного графика)
-SESSION_DURATION_MAX = 900   # Максимум ~15 минут
+SESSION_DURATION_MIN = CHECK_INTERVAL_SEC # Минимум равен интервалу проверки (5 минут) ⚡️ ФИКС ПЕРЕКОСА ✅
+SESSION_DURATION_MAX = SESSION_DURATION_MIN * 3 # Максимум ~15 минут ⚡️ ФИКС ПЕРЕКОСА ✅
 READ_TIMEOUT_SEC = 5         # Ключевое изменение!
 
 
@@ -122,11 +122,11 @@ def keep_radio_alive(slot_index, url):  # <-- Добавил аргумент sl
                     except socket.timeout:
                         pass
                     except Exception as e:
-                        print(f"[{time.strftime('%H:%M:%S')}] [{proc_name}] Read error for {url}: {e}")  # Исправлено здесь
+                        print(f"[{time.strftime('%H:%M:%S')}] [{proc_name}] Read error for {url}: {e}")
                         break
 
         except Exception as e:
-            print(f"[{time.strftime('%H:%M:%S')}] [{proc_name}] Connection error for {url}: {e}. Reconnecting...")  # Исправлено здесь
+            print(f"[{time.strftime('%H:%M:%S')}] [{proc_name}] Connection error for {url}: {e}. Reconnecting...")
         
         finally:
             elapsed = int(time.time() - start_time)
@@ -168,36 +168,39 @@ def scheduler_manager(active_processes):
 
     to_spawn = max(new_target - len(alive_processes), 0)
 
-    #### ⚡️ РАВНОМЕРНЫЙ ДОБОР ПРОЦЕССОВ ✅
+    #### ⚡️ РАВНОМЕРНЫЙ ДОБАВЛЕНИЕ ПРОЦЕССОВ ✅
+    # Мы выбираем свободные слоты случайным образом, чтобы избежать перекоса на старте.
     slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
 
     # Если свободных слотов нет, ничего не создаём.
     if not slots_to_fill:
         return
 
-    #### ⚡️ ФИКС ОШИБКИ ЗДЕСЬ ✅ Мы передаём оба аргумента
     for slot_index in slots_to_fill:
         radio_url = RADIOS[slot_index]
-        # Первый аргумент идёт в slot_index, второй — в url
-        p = SlotProcess(slot=slot_index, target=keep_radio_alive, args=(slot_index, radio_url,))
+        # ⚡️ ФИКС ОШИБКИ ✅ Передаём оба параметра правильно
+        p = SlotProcess(
+            slot=slot_index,
+            target=keep_radio_alive,
+            args=(slot_index, radio_url,)  # Первый аргумент — слот, второй — URL
+        )
         p.start()
-        print(f"[MANAGER] Spawned listener #{slot_index} -> {radio_url}")
+        print(f"[MANAGER] Spawned listener #{slot_index} -> {url}")
         alive_processes.append(p)
 
     #### УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ (Плавно!) ####
     elif len(alive_processes) > new_target:
         processes_to_kill = []
         
-        sorted_processes = sorted(
-            [(p.start(), p) for p in alive_processes],
-            key=lambda x: x[0], reverse=True  # Самые старые идут первыми
-        )
+        # ⚡️ ВАЖНЫЙ ФИКС ✅ Для плавного перехода мы сортируем по времени старта.
+        sorted_processes = [(p.start(), p) for p in alive_processes if hasattr(p, "start")]
 
-        sorted_processes = [item[1] for item in sorted_processes]
+        # Оставляем самых молодых N процессов, где N = target_count.
+        # Старые процессы будут убиваться постепенно, обеспечивая плавность графика.
+        sorted_processes.sort(key=lambda x: x[0])
+        alive_processes = [item[1] for item in sorted_processes[:new_target]]
 
-        alive_processes = sorted_processes[:new_target]
-
-        processes_to_kill = sorted_processes[new_target:]
+        processes_to_kill = [item[1] for item in sorted_processes[new_target:]]
 
         for p in processes_to_kill:
             if p.is_alive():
@@ -221,7 +224,7 @@ if __name__ == "__main__":
         while True:
             time.sleep(CHECK_INTERVAL_SEC)  # Спим 5 минут (300 сек)
             
-            new_target = get_target_listers_for_now()
+            new_target = get_target_listeners_for_now()
             alive_processes = [p for p in manager_active if p.is_alive()]
             current_live = len(alive_processes)
             manager_active = alive_processes
