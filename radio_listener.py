@@ -19,7 +19,7 @@ SESSION_DURATION_MAX = 1600
 READ_TIMEOUT_SEC = 5        
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
-#### НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ (БЫЛИ ПРОПУЩЕНЫ) ###
+#### НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
 PLATFORM_WEIGHTS = [  
     {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
     {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
@@ -106,13 +106,13 @@ def keep_radio_alive(url):
                     response_headers += chunk
 
                 start_time = time.time()
-                
-                # Фиксируем точное время финиша сессии
                 finish_time = start_time + session_duration
 
-                # Цикл прослушивания с жесткой проверкой лимита времени
+                print(f"[{time.strftime('%H:%M:%S')}] Listener on {url} started. Duration target: ~{session_duration}s")
+
+                # Основной цикл удержания соединения
                 while True:
-                    # Если вышло отведенное время (от 100 до 1600 сек) - выходим
+                    # Проверка жесткого лимита времени сессии
                     if time.time() >= finish_time:
                         break
 
@@ -120,11 +120,12 @@ def keep_radio_alive(url):
                         sock.settimeout(READ_TIMEOUT_SEC)
                         data = sock.recv(1024)
                         
-                        # Если сервер закрыл соединение сам
+                        # ИСПРАВЛЕНО: Игнорируем пустые пакеты, чтобы сессия не падала сразу
                         if not data: 
-                            break
+                            continue 
                             
                     except socket.timeout:
+                        # Нормальное поведение при ожидании аудио-пакетов
                         continue
                     except Exception as e:
                         print(f"[{time.strftime('%H:%M:%S')}] Read error for {url}: {e}")
@@ -132,10 +133,12 @@ def keep_radio_alive(url):
 
         except Exception as e:
             print(f"[{time.strftime('%H:%M:%S')}] Connection error for {url}: {e}. Reconnecting...")
+            time.sleep(1) # Небольшая пауза перед новым подключением
         
         finally:
             elapsed = int(time.time() - start_time)
             mins, secs = divmod(elapsed, 60)
+            # Теперь здесь всегда будет отображаться реальное время жизни слушателя
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
 
@@ -173,7 +176,7 @@ if __name__ == "__main__":
 
         factor = get_current_hour_factor()
         
-        # Ваша логика из Кода 1: берем длину списка RADIOS (с учетом дублей!)
+        # Ваша логика распределения из Кода 1 (пропорционально дублям URL)
         target_total = int(len(RADIOS) * factor)
         
         pool = RADIOS.copy()
