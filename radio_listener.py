@@ -8,19 +8,24 @@ from datetime import datetime, timezone
 
 # ⚡️ ВАЖНЫЙ БЛОК ДЛЯ РУЧНОЙ НАСТРОЙКИ ⚡️
 # Здесь задаётся распределение на ПИКЕ (100%).
-# Это база для всех расчётов.
+# Изменяй эти числа, чтобы настроить пропорции.
 STATION_WEIGHTS = {
+    # Синтези должна быть самой популярной
     "sintezi": 31,
+    # Рокатака — небольшая станция
     "rockataka": 8,
+    # Иридиум чуть меньше Рокатаки
     "iridium": 7,
+    # Nevermind — вторая по популярности
     "nevermind": 30,
 }
 
 # Автоматически вычисляем базу (сумму весов)
+# Это будет максимальное количество потоков при 100%.
 BASE_LISTENERS = sum(STATION_WEIGHTS.values())
 
 # Генерируем список RADIOS на основе этих весов.
-# Этот список используется как пул слотов: каждый элемент — уникальный слот.
+# Этот список служит пулом слотов: каждый элемент — уникальный слот.
 RADIOS = []
 for station, weight in STATION_WEIGHTS.items():
     RADIOS.extend([f"https://listen7.myradio24.com/{station}"] * int(weight))
@@ -155,16 +160,6 @@ TARGET_PERCENT_BY_HOUR = {
 }
 
 
-class SlotProcess(Process):
-    """
-    Подкласс стандартного Process, который хранит информацию о своём слоте.
-    Это решает проблему смещения индексов при использовании .insert().
-    """
-    def __init__(self, slot_index, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
-        super().__init__(group=group, target=target, name=name, args=args, kwargs=kwargs, daemon=daemon)
-        self.slot = slot_index  # Сохраняем номер слота
-
-
 def get_target_listeners_for_now():
     """
     Получает целевое число слушателей как процент от текущего размера списка URL.
@@ -174,6 +169,14 @@ def get_target_listeners_for_now():
     percent = TARGET_PERCENT_BY_HOUR.get(utc_hour, 0) / 100  # Возвращаем 0%, если часа нет
     target_count = int(BASE_LISTENERS * percent)
     return target_count
+
+
+# === ФИКС ОШИБКИ ===
+# Мы создаём подкласс стандартного Process, который хранит номер своего слота.
+class SlotProcess(Process):
+    def __init__(self, slot_index, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
+        super().__init__(group=group, target=target, name=name, args=args, kwargs=kwargs, daemon=daemon)
+        self.slot = slot_index  # Сохраняем номер слота
 
 
 def scheduler_manager(active_processes):
@@ -190,7 +193,7 @@ def scheduler_manager(active_processes):
 
     #### ЖЁСТКИЙ ПЕРЕЗАПУСК ВСЕХ ПРОЦЕССОВ ПРИ СМЕНЕ ЧАСА (опционально) ####
     # Если ты хочешь мгновенное перераспределение, раскомментируй этот блок.
-    # prev_utc_hour = None  # Добавь эту переменную здесь
+    # prev_utc_hour = None  # Переменная здесь
     # if current_live != new_target and utc_hour != prev_utc_hour:
     #     processes_to_kill = alive_processes[:]
     #     for p in processes_to_kill:
@@ -209,8 +212,9 @@ def scheduler_manager(active_processes):
         for slot_index in slots_to_fill:
             radio_url = RADIOS[slot_index]
             
-            # Создаём процесс с сохранением номера его слота
-            p = SlotProcess(slot=slot_index, target=keep_radio_alive, args=(radio_url,))
+            # Вот исправленная строка создания процесса
+            # Мы передаём параметр точно так же, как он назван в классе
+            p = SlotProcess(slot_index=slot_index, target=keep_radio_alive, args=(radio_url,))
             p.start()
             print(f"[MANAGER] Spawned listener #{slot_index} -> {radio_url}")
             alive_processes.append(p)  # Просто добавляем в конец списка
