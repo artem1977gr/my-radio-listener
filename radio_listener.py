@@ -19,7 +19,7 @@ SESSION_DURATION_MAX = 1600
 READ_TIMEOUT_SEC = 5        
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
-#### НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
+#### НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ (БЫЛИ ПРОПУЩЕНЫ) ###
 PLATFORM_WEIGHTS = [  
     {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
     {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
