@@ -141,7 +141,7 @@ GRACEFUL_STOP_DELAY = 120     # Задержка перед принудител
 BASE_LISTENERS = len(RADIOS)
 
 # ✅ ТАБЛИЦА ПРОЦЕНТОВ ОТ MAXIMUM
-# Теперь каждый час выражен в процентах от BASE_LISTENERS.
+# Теперь каждый час выражен в процентах от текущей длины списка RADIOS.
 TARGET_PERCENT_BY_HOUR = {
     0: 22, 1: 25, 2: 35, 3: 55, 4: 85, 5: 98, 6: 92, 7: 80,
     8: 75, 9: 78, 10: 76, 11: 74, 12: 77, 13: 82, 14: 90, 15: 100,
@@ -161,8 +161,8 @@ def get_target_listeners_for_now():
 
 def scheduler_manager(active_processes):
     """
-    Управляет пулом процессов так, чтобы их было ровно столько,
-    сколько указано в расписании, но не больше длины списка RADIOS.
+    Управляет пулом процессов так, чтобы они были жестко привязаны к списку RADIOS.
+    Каждому процессу соответствует один конкретный URL-адрес.
     """
     alive_processes = [p for p in active_processes if p.is_alive()]
 
@@ -176,19 +176,17 @@ def scheduler_manager(active_processes):
     current_live = len(alive_processes)
 
     #### ДОБОР ПРОЦЕССОВ ####
-    # Нам нужно столько же процессов, сколько указано в графике, но не более длины списка
-    free_slots = set(range(len(RADIOS)))  # Все возможные слоты
-    occupied_slots = {active_processes.index(p) for p in alive_processes}  # Занятые слоты
-    free_slots -= occupied_slots  # Оставшиеся свободные слоты
-
+    free_slots = set(range(len(RADIOS))) - {active_processes.index(p) for p in alive_processes}
     to_spawn = target_count - current_live
+
+    # Жестко привязываем новые процессы к свободным слотам
     if to_spawn > 0 and free_slots:
-        slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
+        slots_to_fill = list(free_slots)[:to_spawn]
         for slot_index in slots_to_fill:
             radio_url = RADIOS[slot_index]
             p = Process(target=keep_radio_alive, args=(radio_url,))
             p.start()
-            # Важно вставить новый процесс в его слот, чтобы сохранить порядок
+            # Важно вставить новый процесс именно в его слот
             alive_processes.insert(slot_index, p)
             print(f"[MANAGER] Spawned listener #{slot_index} -> {radio_url}")
 
