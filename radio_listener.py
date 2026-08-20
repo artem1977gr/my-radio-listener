@@ -19,6 +19,14 @@ SESSION_DURATION_MAX = 1600
 READ_TIMEOUT_SEC = 5        
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
+#### ⚡️ СУТОЧНЫЙ ПРОФИЛЬ НАГРУЗКИ (был пропущен) ####
+HOURLY_LOAD = {
+    "00": 0.35, "01": 0.30, "02": 0.25, "03": 0.22, "04": 0.25, "05": 0.35,
+    "06": 0.55, "07": 0.85, "08": 0.98, "09": 0.92, "10": 0.80, "11": 0.75,
+    "12": 0.78, "13": 0.76, "14": 0.74, "15": 0.77, "16": 0.82, "17": 0.90,
+    "18": 1.00, "19": 0.88, "20": 0.75, "21": 0.65, "22": 0.50, "23": 0.40
+}
+
 #### НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
 PLATFORM_WEIGHTS = [  
     {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
@@ -116,7 +124,7 @@ def keep_radio_alive(url):
         finally:
             elapsed = int(time.time() - start_time)
             mins, secs = divmod(elapsed, 60)
-            # Таймер сессии работает от системного time.time(), как в оригинале
+            # Таймер сессии использует чистый time.time(), как в вашем рабочем Коде 1
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
 
@@ -160,10 +168,10 @@ if __name__ == "__main__":
         target_total = int(len(RADIOS) * factor)
         
         # Распределение ровно такое же, как в вашем первом сообщении:
-        # просто перемешиваем список нужного размера
+        # просто берем срез от перемешанного списка нужного размера
         pool = RADIOS.copy()
-        pool = pool[:target_total]
         random.shuffle(pool)
+        pool = pool[:target_total]
 
         needed = len(pool) - len(processes)
         
