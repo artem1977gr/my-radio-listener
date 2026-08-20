@@ -1,10 +1,10 @@
 import socket
 import time
-from urllib.parse import urlparse
+from urllib.parse import urlparse # Для правильной работы с URL
 from multiprocessing import Process
 import random
-from zoneinfo import ZoneInfo
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # Глобальные настройки (твои текущие)
 RADIOS = [
@@ -14,23 +14,27 @@ RADIOS = [
     *(['https://listen7.myradio24.com/nevermind'] * 10)
 ]
 REFERER_URL = "https://radio.art-test-1.store"
-SESSION_DURATION_MIN = 100   
-SESSION_DURATION_MAX = 1600  
-READ_TIMEOUT_SEC = 5        
+SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин
+SESSION_DURATION_MAX = 1600  # Максимум ~27 минут
+READ_TIMEOUT_SEC = 5        # Ключевое изменение!
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
-#### НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
-PLATFORM_WEIGHTS = [  
-    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
+#### ⚡️ НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
+PLATFORM_WEIGHTS = [  # Веса для платформ
+    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  # Стационарные ПК
     {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
+    
+    # Мобильная аудитория (большинство пользователей)
     {"os": "Android", "version": "13", "arch": "SM-S901B", "weight": 0.3},
     {"os": "iPhone", "version": "16_6", "model": "iPhone14,2", "weight": 0.2},
+    
+    # Другие десктопы
     {"os": "Linux", "version": "x86_64", "weight": 0.05},
     {"os": "X11", "version": "Ubuntu; Linux x86_64", "weight": 0.05}
 ]
 
-BROWSER_WEIGHTS = [  
-    {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},  
+BROWSER_WEIGHTS = [  # Веса для браузеров
+    {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},  # Доминирует
     {"name": "Firefox", "version": "121.0", "weight": 0.2},
     {"name": "Safari", "version": "605.1.15", "weight": 0.1},
     {"name": "Edge", "version": "120.0.2210.57", "weight": 0.05},
@@ -72,6 +76,7 @@ def generate_user_agent():
         f"(KHTML, like Gecko) {browser_data['name']}/{browser_data['version']} "
         f"Safari/537.{random.randint(30, 40)}"
     )
+    
     return ua_template.strip()
 
 
@@ -83,8 +88,10 @@ def keep_radio_alive(url):
     headers = (
         f"GET {path} HTTP/1.1\r\n"
         f"Host: {host}\r\n"
+        
         f"Icy-MetaData: 1\r\n"
         f"User-Agent: {generate_user_agent()}\r\n"
+        
         f"Referer: {REFERER_URL}\r\n"
         f"Connection: Keep-Alive\r\n"
         "\r\n"
@@ -106,40 +113,23 @@ def keep_radio_alive(url):
                     response_headers += chunk
 
                 start_time = time.time()
-                finish_time = start_time + session_duration
 
-                print(f"[{time.strftime('%H:%M:%S')}] Listener on {url} started. Duration target: ~{session_duration}s")
-
-                # Основной цикл удержания соединения
-                while True:
-                    # Проверка жесткого лимита времени сессии
-                    if time.time() >= finish_time:
-                        break
-
+                #### ОПТИМИЗАЦИЯ ПОД ОБЛАЧНЫЕ СЕРВЕРЫ ####
+                while int(time.time() - start_time) < session_duration:
                     try:
-                        sock.settimeout(READ_TIMEOUT_SEC)
-                        data = sock.recv(1024)
-                        
-                        # ИСПРАВЛЕНО: Игнорируем пустые пакеты, чтобы сессия не падала сразу
-                        if not data: 
-                            continue 
-                            
+                        sock.recv(1024)
                     except socket.timeout:
-                        # Нормальное поведение при ожидании аудио-пакетов
-                        continue
+                        pass
                     except Exception as e:
                         print(f"[{time.strftime('%H:%M:%S')}] Read error for {url}: {e}")
                         break
 
         except Exception as e:
             print(f"[{time.strftime('%H:%M:%S')}] Connection error for {url}: {e}. Reconnecting...")
-            time.sleep(1) # Небольшая пауза перед новым подключением
         
         finally:
             elapsed = int(time.time() - start_time)
-            mins, secs = divmod(elapsed, 60)
-            # Теперь здесь всегда будет отображаться реальное время жизни слушателя
-            print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
+            print(f"[{elapsed//60}:{elapsed%60:02d}] Listener on {url} ended.")
 
 
 def get_moscow_hour():
@@ -155,7 +145,7 @@ if __name__ == "__main__":
     last_logged_hour = None
     
     while True:
-        # Мягкая остановка старых процессов
+        # Очистка завершившихся процессов (как в Коде 1 + проверка возраста)
         alive_new = []
         for p in processes:
             if p.is_alive():
@@ -166,7 +156,7 @@ if __name__ == "__main__":
                     alive_new.append(p)
         processes = alive_new
 
-        # Расчет целевой нагрузки ПО МОСКОВСКОМУ ВРЕМЕНИ
+        # Расчет целевой нагрузки ТОЛЬКО по Москве (исправление таймзоны)
         current_hour = get_moscow_hour()
         
         if current_hour != last_logged_hour:
@@ -176,7 +166,7 @@ if __name__ == "__main__":
 
         factor = get_current_hour_factor()
         
-        # Ваша логика распределения из Кода 1 (пропорционально дублям URL)
+        # ВАША ЛОГИКА ИЗ КОДА 1: строго один процесс на каждую запись в списке RADIOS
         target_total = int(len(RADIOS) * factor)
         
         pool = RADIOS.copy()
