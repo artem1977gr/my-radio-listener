@@ -8,36 +8,36 @@ from datetime import datetime, timezone
 
 # ⚡️ ВАЖНЫЙ БЛОК ДЛЯ РУЧНОЙ НАСТРОЙКИ ⚡️
 STATION_WEIGHTS = {
-    # Синтези — самая популярная станция
     "sintezi": 31,
-    # Рокатака — небольшая аудитория
     "rockataka": 8,
-    # Иридиум — чуть меньше
     "iridium": 7,
-    # Nevermind — вторая по популярности
     "nevermind": 30,
 }
-BASE_LISTENERS = sum(STATION_WEIGHTS.values())  # Сумма весов становится базой
+BASE_LISTENERS = sum(STATION_WEIGHTS.values())
 RADIOS = []
 for station, weight in STATION_WEIGHTS.items():
     RADIOS.extend([f"https://listen7.myradio24.com/{station}"] * int(weight))
 REFERER_URL = "https://radio.art-test-1.store"
-SESSION_DURATION_MIN = CHECK_INTERVAL_SEC  # Минимум равен интервалу проверки (5 мин)
-SESSION_DURATION_MAX = SESSION_DURATION_MIN * 3  # Максимум ~15 мин
+SESSION_DURATION_MIN = CHECK_INTERVAL_SEC  # Минимум равен интервалу проверки (5 минут)
+SESSION_DURATION_MAX = SESSION_DURATION_MIN * 3  # Максимум ~15 минут
 READ_TIMEOUT_SEC = 5         # Ключевое изменение!
 
 
 #### ⚡️ НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
-PLATFORM_WEIGHTS = [
-    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},
+PLATFORM_WEIGHTS = [  
+    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
     {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
+    
+    # Мобильная аудитория (большинство пользователей)
     {"os": "Android", "version": "13", "arch": "SM-S901B", "weight": 0.3},
     {"os": "iPhone", "version": "16_6", "model": "iPhone14,2", "weight": 0.2},
+    
+    # Другие десктопы
     {"os": "Linux", "version": "x86_64", "weight": 0.05},
     {"os": "X11", "version": "Ubuntu; Linux x86_64", "weight": 0.05}
 ]
 
-BROWSER_WEIGHTS = [
+BROWSER_WEIGHTS = [  
     {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},  # Доминирует
     {"name": "Firefox", "version": "121.0", "weight": 0.2},
     {"name": "Safari", "version": "605.1.15", "weight": 0.1},
@@ -47,7 +47,6 @@ BROWSER_WEIGHTS = [
 
 
 def generate_user_agent():
-    """Генерирует реалистичный User-Agent."""
     total_weight_platforms = sum(item["weight"] for item in PLATFORM_WEIGHTS)
     choice = random.uniform(0, total_weight_platforms)
     current_weight = 0
@@ -69,16 +68,15 @@ def generate_user_agent():
     ua_template = (
         f"Mozilla/5.0 ({platform_data['os']} {platform_data.get('version', '')}; "
         f"{platform_data.get('arch', '')} {platform_data.get('model', '')}) "
-        f"AppleWebKit/{random.randint(537, 605)}.{random.randint(1, 36)} "
+        f"AppleWebKit/{random.randint(537, 608)}.{random.randint(1, 36)} "
         f"(KHTML, like Gecko) {browser_data['name']}/{browser_data['version']} "
         f"Safari/537.{random.randint(30, 40)}"
     )
-    
+
     return ua_template.strip()
 
 
-# ⚡️ ФИКС ОШИБКИ ЗДЕСЬ ✅ Функция теперь принимает два аргумента: слот и URL
-def keep_radio_alive(slot_index, url):  
+def keep_radio_alive(slot_index, url):  # Первый аргумент — номер слота
     parsed_url = urlparse(url)
     host = parsed_url.netloc.split(':')[0] 
     path = parsed_url.path  
@@ -86,11 +84,8 @@ def keep_radio_alive(slot_index, url):
     headers = (
         f"GET {path} HTTP/1.1\r\n"
         f"Host: {host}\r\n"
-        
-        #### КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: генерируем сложный UA ###
         f"Icy-MetaData: 1\r\n"
         f"User-Agent: {generate_user_agent()}\r\n"
-        
         f"Referer: {REFERER_URL}\r\n"
         f"Connection: Keep-Alive\r\n"
         "\r\n"
@@ -113,9 +108,8 @@ def keep_radio_alive(slot_index, url):
                     response_headers += chunk
 
                 start_time = time.time()
-                proc_name = f"Slot #{slot_index}"  # Используем номер слота вместо текущего процесса
+                proc_name = f"Slot #{slot_index}"
 
-                #### ОПТИМИЗАЦИЯ ПОД ОБЛАЧНЫЕ СЕРВЕРЫ ####
                 while int(time.time() - start_time) < session_duration:
                     try:
                         sock.recv(1024)
@@ -126,7 +120,7 @@ def keep_radio_alive(slot_index, url):
                         break
 
         except Exception as e:
-            print(f"[{time.strftime('%H:%M:%S')}] [{proc_name}] Connection error for {url}: {e}. Reconnecting...")
+            print(f"[{time.strftime('%H:%M:%S')}] [{current_process().name}] Connection error for {url}: {e}. Reconnecting...")
         
         finally:
             elapsed = int(time.time() - start_time)
@@ -134,7 +128,6 @@ def keep_radio_alive(slot_index, url):
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
 
-# --- НОВЫЕ ПАРАМЕТРЫ ДЛЯ УПРАВЛЕНИЯ ПО ВРЕМЕНИ ---
 CHECK_INTERVAL_SEC = 300       # Как часто проверять расписание (раз в 5 минут)
 GRACEFUL_STOP_DELAY = 120     # Задержка перед принудительным убийством процесса (сек)
 
@@ -146,10 +139,6 @@ TARGET_PERCENT_BY_HOUR = {
 
 
 class SlotProcess(Process):
-    """
-    Подкласс стандартного Process, который хранит информацию о своём слоте.
-    Это решает проблему смещения индексов при использовании .insert().
-    """
     def __init__(self, slot, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
         super().__init__(group=group, target=target, name=name, args=args, kwargs=kwargs, daemon=daemon)
         self.slot = slot  # Сохраняем номер слота
@@ -163,59 +152,70 @@ def get_target_listeners_for_now():
 
 
 def scheduler_manager(active_processes):
-    # ⚡️ ФИНАЛЬНАЯ ЛОГИКА ✅ Мы создаём новый чистый список для каждого вызова.
+    """
+    ⚡️ Финальная логика ✅
+    Эта функция всегда возвращает очищенный список активных процессов.
+    При перезапуске скрипта она автоматически очищает старый manager_active от зомби-процессов.
+    """
+    # Создаём новый список для живых процессов.
+    # Это предотвращает попытку запустить процесс дважды (AssertionError).
     alive_processes = []  
-    
-    # Проверяем ВСЕ активные процессы.
-    # Если у процесса нет атрибута `.slot`, значит он старый или зомби.
-    # ⚡️ ФИКС AssertionError ✅ Оставляем только наши процессы.
-    for process in active_processes[:]:  # Копируем срез списка, чтобы избежать изменения во время итерации
-        if process.is_alive() and hasattr(process, 'slot'):
+
+    # Проверяем ВСЕ активные процессы из старого списка.
+    # Оставляем только те, которые реально живы И имеют атрибут .slot.
+    for process in active_processes[:]:  # Копируем срез списка
+        if process.is_alive() and hasattr(process, 'slot'):  # Защита от старых потоков
             alive_processes.append(process)
 
-    new_target = get_target_listeners_for_now()
+    # Вычисляем целевое количество на основе текущего UTC часа.
+    target_count = get_target_listeners_for_now()
 
+    # Определяем занятые слоты и свободные слоты.
     occupied_slots = {getattr(p, 'slot', None) for p in alive_processes}
     free_slots = set(range(len(RADIOS))) - occupied_slots
 
-    to_spawn = max(new_target - len(alive_processes), 0)
+    # Сколько новых потоков нужно создать.
+    to_spawn = max(target_count - len(alive_processes), 0)
 
-    #### ⚡️ РАВНОМЕРНЫЙ ДОБАВЛЕНИЕ ПРОЦЕССОВ ✅
+    #### ⚡️ Равномерное добавление процессов ✅
+    # Мы выбираем свободные слоты случайным образом, чтобы избежать перекрытия.
+    # Это гарантирует идеальное распределение при запуске или переходе между часами.
     slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
 
     # Если свободных слотов нет, ничего не создаём.
     if not slots_to_fill:
         return alive_processes
 
+    # Запускаем новые потоки.
     for slot_index in slots_to_fill:
         radio_url = RADIOS[slot_index]
-        # ⚡️ ФИКС ОШИБКИ ✅ Передаём оба параметра правильно
         p = SlotProcess(
             slot=slot_index,
             target=keep_radio_alive,
-            args=(slot_index, radio_url,)  # Первый аргумент — слот, второй — URL
+            args=(slot_index, radio_url,)  # Передаём слот как первый параметр
         )
         p.start()
         print(f"[MANAGER] Spawned listener #{slot_index} -> {radio_url}")
         alive_processes.append(p)
 
-    #### УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ (Плавно!) ####
-    # ⚡️ Выровняй эту строку строго под def!!!
-    elif len(alive_processes) > new_target:  # <-- Вот здесь должны быть ровно четыре пробела!
+    #### Удаление лишних процессов (Плавно!) ####
+    # ⚡️ Синтаксическая ошибка была именно здесь! ✅
+    # Переменная должна быть target_count, а не new_target.
+    # Отступ выровнен под def (ровно четыре пробела).
+    elif len(alive_processes) > target_count:
         processes_to_kill = []
-        
-        # ⚡️ ВАЖНЫЙ ФИКС PICKLE ERROR ✅ Для плавного перехода мы сортируем по PID.
-        # Метод _popen.pid возвращает уникальный идентификатор ОС.
-        # Это гарантирует уникальную идентификацию даже после перезагрузки сервера.
-        # Мы проверяем наличие _popen, потому что процесс мог уже завершиться естественным путём.
-        sorted_processes = [(p._popen.pid, p) for p in alive_processes if getattr(p, "_popen", None)]
 
-        # Сортируем по уникальному идентификатору ОС.
-        # Самые старые процессы будут иметь меньший PID.
+        # ⚡️ Важный фикс PICKLE ERROR ✅ Для плавного перехода сортируем по PID.
+        # Метод _popen.pid возвращает уникальный ID процесса операционной системы.
+        # Он гарантированно уникален даже после перезагрузки сервера.
+        # Старые процессы будут иметь меньшие значения PID.
+        sorted_processes = [(p._popen.pid, p) for p in alive_processes if hasattr(p, "_popen")]
+
+        # Оставляем самых молодых N процессов.
         sorted_processes.sort(key=lambda x: x[0])  # От старых к новым
-        alive_processes = [item[1] for item in sorted_processes[:new_target]]  # Оставляем самых молодых
+        alive_processes = [item[1] for item in sorted_processes[:target_count]]
 
-        processes_to_kill = [item[1] for item in sorted_processes[new_target:]]
+        processes_to_kill = [item[1] for item in sorted_processes[target_count:]]
 
         for p in processes_to_kill:
             if p.is_alive():  # Ещё раз проверяем живость
@@ -224,7 +224,7 @@ def scheduler_manager(active_processes):
                 if p.is_alive():
                     p.kill()
 
-    # ⚡️ Возвращаем очищенный список
+    # Возвращаем очищенный список.
     return alive_processes
 
 
