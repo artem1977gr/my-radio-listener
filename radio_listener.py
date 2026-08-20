@@ -6,33 +6,21 @@ import random
 from datetime import datetime, timezone
 
 
-# ⚡️ ВАЖНЫЙ БЛОК ДЛЯ РУЧНОЙ НАСТРОЙКИ ⚡️
-# Здесь задаётся распределение на ПИКЕ (100%).
-# Изменяй эти числа, чтобы настроить пропорции.
+# Глобальные настройки потоков (сумма = пик)
 STATION_WEIGHTS = {
-    # Синтези должна быть самой популярной
     "sintezi": 31,
-    # Рокатака — небольшая станция
     "rockataka": 8,
-    # Иридиум чуть меньше Рокатаки
     "iridium": 7,
-    # Nevermind — вторая по популярности
     "nevermind": 30,
 }
-
-# Автоматически вычисляем базу (сумму весов)
-# Это будет максимальное количество потоков при 100%.
 BASE_LISTENERS = sum(STATION_WEIGHTS.values())
-
-# Генерируем список RADIOS на основе этих весов.
-# Этот список служит пулом слотов: каждый элемент — уникальный слот.
 RADIOS = []
 for station, weight in STATION_WEIGHTS.items():
     RADIOS.extend([f"https://listen7.myradio24.com/{station}"] * int(weight))
 REFERER_URL = "https://radio.art-test-1.store"
-SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин
-SESSION_DURATION_MAX = 1600  # Максимум ~27 минут
-READ_TIMEOUT_SEC = 5        # Ключевое изменение!
+SESSION_DURATION_MIN = 600   # Минимум ~10 минут (для плавного графика)
+SESSION_DURATION_MAX = 900   # Максимум ~15 минут
+READ_TIMEOUT_SEC = 5         # Ключевое изменение!
 
 
 #### ⚡️ НАСТРОЙКИ РЕАЛИСТИЧНЫХ USER-AGENT'ОВ ###
@@ -60,7 +48,6 @@ BROWSER_WEIGHTS = [
 
 def generate_user_agent():
     """Генерирует реалистичный User-Agent."""
-    #### ВЫБИРАЕМ ПЛАТФОРМУ ПО ВЕСАМ ####
     total_weight_platforms = sum(item["weight"] for item in PLATFORM_WEIGHTS)
     choice = random.uniform(0, total_weight_platforms)
     current_weight = 0
@@ -70,7 +57,6 @@ def generate_user_agent():
             platform_data = plat
             break
     
-    #### ВЫБИРАЕМ БРАУЗЕР ПО ВЕСАМ ####
     total_weight_browsers = sum(item["weight"] for item in BROWSER_WEIGHTS)
     choice = random.uniform(0, total_weight_browsers)
     current_weight = 0
@@ -80,7 +66,6 @@ def generate_user_agent():
             browser_data = brw
             break
     
-    #### СОБИРАЕМ СТРОКУ ####
     ua_template = (
         f"Mozilla/5.0 ({platform_data['os']} {platform_data.get('version', '')}; "
         f"{platform_data.get('arch', '')} {platform_data.get('model', '')}) "
@@ -92,7 +77,8 @@ def generate_user_agent():
     return ua_template.strip()
 
 
-def keep_radio_alive(url):
+# ⚡️ ФИКС ОШИБКИ ЗДЕСЬ ✅ Функция теперь принимает ДВА аргумента
+def keep_radio_alive(slot_index, url):  # <-- Добавил аргумент slot_index
     parsed_url = urlparse(url)
     host = parsed_url.netloc.split(':')[0] 
     path = parsed_url.path  
@@ -127,7 +113,7 @@ def keep_radio_alive(url):
                     response_headers += chunk
 
                 start_time = time.time()
-                proc_name = current_process().name
+                proc_name = f"Slot #{slot_index}"  # ⚡️ ФИКС ОШИБКИ ✅ Используем номер слота
 
                 #### ОПТИМИЗАЦИЯ ПОД ОБЛАЧНЫЕ СЕРВЕРЫ ####
                 while int(time.time() - start_time) < session_duration:
@@ -136,11 +122,11 @@ def keep_radio_alive(url):
                     except socket.timeout:
                         pass
                     except Exception as e:
-                        print(f"[{time.strftime('%H:%M:%S')}] [{proc_name}] Read error for {url}: {e}")
+                        print(f"[{time.strftime('%H:%M:%S')}] [{proc_name}] Read error for {url}: {e}")  # Исправлено здесь
                         break
 
         except Exception as e:
-            print(f"[{time.strftime('%H:%M:%S')}] [{current_process().name}] Connection error for {url}: {e}. Reconnecting...")
+            print(f"[{time.strftime('%H:%M:%S')}] [{proc_name}] Connection error for {url}: {e}. Reconnecting...")  # Исправлено здесь
         
         finally:
             elapsed = int(time.time() - start_time)
@@ -152,7 +138,6 @@ def keep_radio_alive(url):
 CHECK_INTERVAL_SEC = 300       # Как часто проверять расписание (раз в 5 минут)
 GRACEFUL_STOP_DELAY = 120     # Задержка перед принудительным убийством процесса (сек)
 
-# ✅ ТАБЛИЦА ПРОЦЕНТОВ ОТ MAXIMUM
 TARGET_PERCENT_BY_HOUR = {
     0: 22, 1: 25, 2: 35, 3: 55, 4: 85, 5: 98, 6: 92, 7: 80,
     8: 75, 9: 78, 10: 76, 11: 74, 12: 77, 13: 82, 14: 90, 15: 100,
@@ -160,82 +145,58 @@ TARGET_PERCENT_BY_HOUR = {
 }
 
 
+class SlotProcess(Process):
+    def __init__(self, slot, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
+        super().__init__(group=group, target=target, name=name, args=args, kwargs=kwargs, daemon=daemon)
+        self.slot = slot  # Сохраняем номер слота
+
+
 def get_target_listeners_for_now():
-    """
-    Получает целевое число слушателей как процент от текущего размера списка URL.
-    Защищено от ошибки KeyError, если вдруг в графике нет часа.
-    """
     utc_hour = datetime.now(timezone.utc).hour
-    percent = TARGET_PERCENT_BY_HOUR.get(utc_hour, 0) / 100  # Возвращаем 0%, если часа нет
+    percent = TARGET_PERCENT_BY_HOUR.get(utc_hour, 0) / 100  
     target_count = int(BASE_LISTENERS * percent)
     return target_count
-
-
-# === ФИКС ОШИБКИ ===
-# Мы создаём подкласс стандартного Process, который хранит номер своего слота.
-class SlotProcess(Process):
-    def __init__(self, slot_index, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
-        super().__init__(group=group, target=target, name=name, args=args, kwargs=kwargs, daemon=daemon)
-        self.slot = slot_index  # Сохраняем номер слота
 
 
 def scheduler_manager(active_processes):
     alive_processes = [p for p in active_processes if p.is_alive()]
 
-    # Текущее время по UTC
     new_target = get_target_listeners_for_now()
 
-    # Вычисляем занятые слоты через наш новый атрибут process.slot
     occupied_slots = {getattr(p, 'slot', None) for p in alive_processes}
     free_slots = set(range(len(RADIOS))) - occupied_slots
 
-    to_spawn = new_target - len(alive_processes)
+    to_spawn = max(new_target - len(alive_processes), 0)
 
-    #### ЖЁСТКИЙ ПЕРЕЗАПУСК ВСЕХ ПРОЦЕССОВ ПРИ СМЕНЕ ЧАСА (опционально) ####
-    # Если ты хочешь мгновенное перераспределение, раскомментируй этот блок.
-    # prev_utc_hour = None  # Переменная здесь
-    # if current_live != new_target and utc_hour != prev_utc_hour:
-    #     processes_to_kill = alive_processes[:]
-    #     for p in processes_to_kill:
-    #         if p.is_alive():
-    #             p.terminate()
-    #             p.join(timeout=GRACEFUL_STOP_DELAY)
-    #             if p.is_alive():
-    #                 p.kill()
-    #     manager_active.clear()
-    # prev_utc_hour = utc_hour
+    #### ⚡️ РАВНОМЕРНЫЙ ДОБОР ПРОЦЕССОВ ✅
+    slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
 
-    #### ДОБОР ПРОЦЕССОВ ####
-    # Запускаем новые процессы в свободные слоты
-    if to_spawn > 0 and free_slots:
-        slots_to_fill = list(free_slots)[:to_spawn]
-        for slot_index in slots_to_fill:
-            radio_url = RADIOS[slot_index]
-            
-            # Вот исправленная строка создания процесса
-            # Мы передаём параметр точно так же, как он назван в классе
-            p = SlotProcess(slot_index=slot_index, target=keep_radio_alive, args=(radio_url,))
-            p.start()
-            print(f"[MANAGER] Spawned listener #{slot_index} -> {radio_url}")
-            alive_processes.append(p)  # Просто добавляем в конец списка
+    # Если свободных слотов нет, ничего не создаём.
+    if not slots_to_fill:
+        return
+
+    #### ⚡️ ФИКС ОШИБКИ ЗДЕСЬ ✅ Мы передаём оба аргумента
+    for slot_index in slots_to_fill:
+        radio_url = RADIOS[slot_index]
+        # Первый аргумент идёт в slot_index, второй — в url
+        p = SlotProcess(slot=slot_index, target=keep_radio_alive, args=(slot_index, radio_url,))
+        p.start()
+        print(f"[MANAGER] Spawned listener #{slot_index} -> {radio_url}")
+        alive_processes.append(p)
 
     #### УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ (Плавно!) ####
     elif len(alive_processes) > new_target:
         processes_to_kill = []
-
-        # Сортируем живые процессы по времени старта (самые старые первыми)
+        
         sorted_processes = sorted(
             [(p.start(), p) for p in alive_processes],
             key=lambda x: x[0], reverse=True  # Самые старые идут первыми
         )
 
-        # Берём только ссылки на объекты процессов
         sorted_processes = [item[1] for item in sorted_processes]
 
-        # Оставляем первых N процессов, где N = target_count
         alive_processes = sorted_processes[:new_target]
 
-        # Все остальные должны быть закрыты
         processes_to_kill = sorted_processes[new_target:]
 
         for p in processes_to_kill:
@@ -252,7 +213,6 @@ def scheduler_manager(active_processes):
 if __name__ == "__main__":
     manager_active = []
     
-    # Первоначальный запуск на текущее значение по UTC
     initial_target = get_target_listeners_for_now()
     print(f"[INIT] Starting at {initial_target} listeners based on current UTC hour.")
     scheduler_manager(manager_active)
@@ -261,8 +221,7 @@ if __name__ == "__main__":
         while True:
             time.sleep(CHECK_INTERVAL_SEC)  # Спим 5 минут (300 сек)
             
-            new_target = get_target_listeners_for_now()
-            # Очищаем список от завершившихся естественным путем процессов
+            new_target = get_target_listers_for_now()
             alive_processes = [p for p in manager_active if p.is_alive()]
             current_live = len(alive_processes)
             manager_active = alive_processes
