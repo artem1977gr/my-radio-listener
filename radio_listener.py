@@ -12,7 +12,7 @@ RADIOS = [
     *(['https://listen7.myradio24.com/rockataka'] * 8), 
     *(['https://listen7.myradio24.com/iridium'] * 10),
     *(['https://listen7.myradio24.com/nevermind'] * 30),
-    *(['https://listen7.myradio24.com/nevermind0'] * 10)
+    *(['https://listen7.myradio24.com/63908'] * 10)
 ]
 REFERER_URL = "https://fmradiofree.com"
 SESSION_DURATION_MIN = 100   # Минимум ~1:40 мин
