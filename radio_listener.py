@@ -12,7 +12,7 @@ READ_TIMEOUT_SEC = 5
 CHECK_INTERVAL_SEC = 300     
 GRACEFUL_STOP_DELAY = 120    
 
-# ЕДИНЫЙ ГРАФИК ДЛЯ ВСЕХ СТАНЦИЙ (взято из вашего последнего сообщения)
+# ЕДИНЫЙ ГРАФИК ДЛЯ ВСЕХ СТАНЦИЙ
 TARGET_PERCENT_BY_HOUR = {
     0: 22, 1: 25, 2: 35, 3: 55, 4: 85, 5: 98, 6: 92, 7: 80,
     8: 75, 9: 78, 10: 76, 11: 74, 12: 77, 13: 82, 14: 90, 15: 100,
@@ -120,24 +120,36 @@ def get_target_sintezi():
     return int(MAX_SINTEZI * (percent / 100))
 
 def scheduler_sintezi(active_processes):
+    # 1. Оставляем только живые процессы
     alive = [p for p in active_processes if p.is_alive()]
+    
     target = get_target_sintezi()
     current_live = len(alive)
-    free_slots = set(range(MAX_SINTEZI)) - {active_processes.index(p) for p in alive}
+    
+    # 2. Находим свободные индексы во всем массиве RADIOS
+    all_slots = set(range(MAX_SINTEZI))
+    occupied_slots = set()
+    for p in alive:
+        try:
+            idx = active_processes.index(p)
+            occupied_slots.add(idx)
+        except ValueError:
+            continue
+            
+    free_slots = list(all_slots - occupied_slots)
+    
     to_spawn = target - current_live
+    
     if to_spawn > 0 and free_slots:
-        slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
+        slots_to_fill = random.sample(free_slots, min(to_spawn, len(free_slots)))
         for slot_index in slots_to_fill:
             p = Process(target=keep_radio_alive, args=(RADIO_SINTEZI, REFERER_SINTEZI))
             p.start()
+            # Вставляем новый процесс ровно в его слот
             active_processes.insert(slot_index, p)
             print(f"[SINTEZI-MANAGER] Spawned #{slot_index}")
-    elif current_live > target:
-        processes_to_kill = list(reversed(alive))[:current_live - target]
-        for p in processes_to_kill:
-            if p.is_alive(): p.terminate(); p.join(timeout=GRACEFUL_STOP_DELAY); p.kill()
-        active_processes = [p for p in alive if p not in processes_to_kill]
-    manager_sintezi_active.clear(); manager_sintezi_active.extend(active_processes)
+            
+    manager_sintezi_active[:] = alive
 
 # --- СТАНЦИЯ 2: nevermind ---
 RADIO_NEVERMIND = "https://listen7.myradio24.com/nevermind"
@@ -154,21 +166,29 @@ def scheduler_nevermind(active_processes):
     alive = [p for p in active_processes if p.is_alive()]
     target = get_target_nevermind()
     current_live = len(alive)
-    free_slots = set(range(MAX_NEVERMIND)) - {active_processes.index(p) for p in alive}
+    
+    all_slots = set(range(MAX_NEVERMIND))
+    occupied_slots = set()
+    for p in alive:
+        try:
+            idx = active_processes.index(p)
+            occupied_slots.add(idx)
+        except ValueError:
+            continue
+            
+    free_slots = list(all_slots - occupied_slots)
+    
     to_spawn = target - current_live
+    
     if to_spawn > 0 and free_slots:
-        slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
+        slots_to_fill = random.sample(free_slots, min(to_spawn, len(free_slots)))
         for slot_index in slots_to_fill:
             p = Process(target=keep_radio_alive, args=(RADIO_NEVERMIND, REFERER_NEVERMIND))
             p.start()
             active_processes.insert(slot_index, p)
             print(f"[NEVERMIND-MANAGER] Spawned #{slot_index}")
-    elif current_live > target:
-        processes_to_kill = list(reversed(alive))[:current_live - target]
-        for p in processes_to_kill:
-            if p.is_alive(): p.terminate(); p.join(timeout=GRACEFUL_STOP_DELAY); p.kill()
-        active_processes = [p for p in alive if p not in processes_to_kill]
-    manager_nevermind_active.clear(); manager_nevermind_active.extend(active_processes)
+            
+    manager_nevermind_active[:] = alive
 
 # --- СТАНЦИЯ 3: rockataka ---
 RADIO_ROCKATAKA = "https://listen7.myradio24.com/rockataka"
@@ -185,21 +205,29 @@ def scheduler_rockataka(active_processes):
     alive = [p for p in active_processes if p.is_alive()]
     target = get_target_rockataka()
     current_live = len(alive)
-    free_slots = set(range(MAX_ROCKATAKA)) - {active_processes.index(p) for p in alive}
+    
+    all_slots = set(range(MAX_ROCKATAKA))
+    occupied_slots = set()
+    for p in alive:
+        try:
+            idx = active_processes.index(p)
+            occupied_slots.add(idx)
+        except ValueError:
+            continue
+            
+    free_slots = list(all_slots - occupied_slots)
+    
     to_spawn = target - current_live
+    
     if to_spawn > 0 and free_slots:
-        slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
+        slots_to_fill = random.sample(free_slots, min(to_spawn, len(free_slots)))
         for slot_index in slots_to_fill:
             p = Process(target=keep_radio_alive, args=(RADIO_ROCKATAKA, REFERER_ROCKATAKA))
             p.start()
             active_processes.insert(slot_index, p)
             print(f"[ROCKATAKA-MANAGER] Spawned #{slot_index}")
-    elif current_live > target:
-        processes_to_kill = list(reversed(alive))[:current_live - target]
-        for p in processes_to_kill:
-            if p.is_alive(): p.terminate(); p.join(timeout=GRACEFUL_STOP_DELAY); p.kill()
-        active_processes = [p for p in alive if p not in processes_to_kill]
-    manager_rockataka_active.clear(); manager_rockataka_active.extend(active_processes)
+            
+    manager_rockataka_active[:] = alive
 
 # --- СТАНЦИЯ 4: iridium ---
 RADIO_IRIDIUM = "https://listen7.myradio24.com/iridium"
@@ -216,30 +244,37 @@ def scheduler_iridium(active_processes):
     alive = [p for p in active_processes if p.is_alive()]
     target = get_target_iridium()
     current_live = len(alive)
-    free_slots = set(range(MAX_IRIDIUM)) - {active_processes.index(p) for p in alive}
+    
+    all_slots = set(range(MAX_IRIDIUM))
+    occupied_slots = set()
+    for p in alive:
+        try:
+            idx = active_processes.index(p)
+            occupied_slots.add(idx)
+        except ValueError:
+            continue
+            
+    free_slots = list(all_slots - occupied_slots)
+    
     to_spawn = target - current_live
+    
     if to_spawn > 0 and free_slots:
-        slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
+        slots_to_fill = random.sample(free_slots, min(to_spawn, len(free_slots)))
         for slot_index in slots_to_fill:
             p = Process(target=keep_radio_alive, args=(RADIO_IRIDIUM, REFERER_IRIDIUM))
             p.start()
             active_processes.insert(slot_index, p)
             print(f"[IRIDIUM-MANAGER] Spawned #{slot_index}")
-    elif current_live > target:
-        processes_to_kill = list(reversed(alive))[:current_live - target]
-        for p in processes_to_kill:
-            if p.is_alive(): p.terminate(); p.join(timeout=GRACEFUL_STOP_DELAY); p.kill()
-        active_processes = [p for p in alive if p not in processes_to_kill]
-    manager_iridium_active.clear(); manager_iridium_active.extend(active_processes)
+            
+    manager_iridium_active[:] = alive
 
 
 if __name__ == "__main__":
-    # Первоначальный запуск четырех менеджеров
     init_sin = get_target_sintezi()
     init_nev = get_target_nevermind()
     init_roc = get_target_rockataka()
     init_iri = get_target_iridium()
-    print(f"[INIT] Sintezi:{init_sin} Nevermind:{init_nev} Rockataka:{init_roc} Iridium:{init_iri}")
+    print(f"[INIT] Starting at Sintezi:{init_sin} Nevermind:{init_nev} Rockataka:{init_roc} Iridium:{init_iri}")
     
     scheduler_sintezi(manager_sintezi_active)
     scheduler_nevermind(manager_nevermind_active)
@@ -255,10 +290,10 @@ if __name__ == "__main__":
             r_alive = [p for p in manager_rockataka_active if p.is_alive()]
             i_alive = [p for p in manager_iridium_active if p.is_alive()]
             
-            manager_sintezi_active = s_alive
-            manager_nevermind_active = n_alive
-            manager_rockataka_active = r_alive
-            manager_iridium_active = i_alive
+            manager_sintezi_active[:] = s_alive
+            manager_nevermind_active[:] = n_alive
+            manager_rockataka_active[:] = r_alive
+            manager_iridium_active[:] = i_alive
 
             new_sin = get_target_sintezi()
             new_nev = get_target_nevermind()
