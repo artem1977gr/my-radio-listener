@@ -2,7 +2,7 @@ import socket
 import time
 import random
 from urllib.parse import urlparse
-from multiprocessing import Process, current_process
+from multiprocessing import Process, current_process, Event
 from datetime import datetime, timezone
 
 #### ОБЩИЕ НАСТРОЙКИ ####
@@ -19,24 +19,14 @@ TARGET_PERCENT_BY_HOUR = {
     16: 88, 17: 75, 18: 65, 19: 50, 20: 40, 21: 35, 22: 30, 23: 25
 }
 
-# Настройки User-Agent остаются общими для всех станций
-PLATFORM_WEIGHTS = [  
-    {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
-    {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
-    {"os": "Android", "version": "13", "arch": "SM-S901B", "weight": 0.3},
-    {"os": "iPhone", "version": "16_6", "model": "iPhone14,2", "weight": 0.2},
-    {"os": "Linux", "version": "x86_64", "weight": 0.05},
-    {"os": "X11", "version": "Ubuntu; Linux x86_64", "weight": 0.05}
-]
-BROWSER_WEIGHTS = [  
-    {"name": "Chrome", "version": "129.0.0.0", "weight": 0.6},
-    {"name": "Firefox", "version": "121.0", "weight": 0.2},
-    {"name": "Safari", "version": "605.1.15", "weight": 0.1},
-    {"name": "Edge", "version": "120.0.2210.57", "weight": 0.05},
-    {"name": "Opera", "version": "98.0.4825.16", "weight": 0.05}
-]
-
 def generate_user_agent():
+    # [Код генерации UA остается без изменений]
+    PLATFORM_WEIGHTS = [{"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1}, {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
+                        {"os": "Android", "version": "13", "arch": "SM-S901B", "weight": 0.3}, {"os": "iPhone", "version": "16_6", "model": "iPhone14,2", "weight": 0.2},
+                        {"os": "Linux", "version": "x86_64", "weight": 0.05}, {"os": "X11", "version": "Ubuntu; Linux x86_64", "weight": 0.05}]
+    BROWSER_WEIGHTS = [{"name": "Chrome", "version": "129.0.0.0", "weight": 0.6}, {"name": "Firefox", "version": "121.0", "weight": 0.2},
+                       {"name": "Safari", "version": "605.1.15", "weight": 0.1}, {"name": "Edge", "version": "120.0.2210.57", "weight": 0.05}, {"name": "Opera", "version": "98.0.4825.16", "weight": 0.05}]
+    
     total_weight_platforms = sum(item["weight"] for item in PLATFORM_WEIGHTS)
     choice = random.uniform(0, total_weight_platforms)
     current_weight = 0
@@ -108,212 +98,153 @@ def keep_radio_alive(url, referer_url):
             mins, secs = divmod(elapsed, 60)
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
-# --- СТАНЦИЯ 1: sintezi ---
-RADIO_SINTEZI = "https://listen7.myradio24.com/sintezi"
-MAX_SINTEZI = 31
-REFERER_SINTEZI = "https://source-sintezi.ru"
-manager_sintezi_active = []
+# --- МЕНЕДЖЕРЫ-ДЕМОНЫ (Запускаются один раз и работают в фоне) ---
 
-def get_target_sintezi():
-    utc_hour = datetime.now(timezone.utc).hour
-    percent = TARGET_PERCENT_BY_HOUR[utc_hour]
-    return int(MAX_SINTEZI * (percent / 100))
+def sintezi_manager_loop(active_list_ref, stop_event):
+    RADIO_SINTEZI = "https://listen7.myradio24.com/sintezi"
+    REFERER_SINTEZI = "https://source-sintezi.ru"
+    MAX_SINTEZI = 31
+    while not stop_event.is_set():
+        time.sleep(CHECK_INTERVAL_SEC)
+        alive = [p for p in active_list_ref if p.is_alive()]
+        target = int(MAX_SINTEZI * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
+        
+        all_slots = set(range(MAX_SINTEZI))
+        occupied = set()
+        for p in alive:
+            try: occupied.add(active_list_ref.index(p))
+            except ValueError: continue
+        free = list(all_slots - occupied)
+        
+        to_spawn = target - len(alive)
+        if to_spawn > 0 and free:
+            slots_to_fill = random.sample(free, min(to_spawn, len(free)))
+            for slot_index in slots_to_fill:
+                p = Process(target=keep_radio_alive, args=(RADIO_SINTEZI, REFERER_SINTEZI))
+                p.start()
+                active_list_ref.insert(slot_index, p)
+                print(f"[SINTEZI-MANAGER] Spawned #{slot_index}")
 
-def scheduler_sintezi(active_processes):
-    # 1. Оставляем только живые процессы
-    alive = [p for p in active_processes if p.is_alive()]
-    
-    target = get_target_sintezi()
-    current_live = len(alive)
-    
-    # 2. Находим свободные индексы во всем массиве RADIOS
-    all_slots = set(range(MAX_SINTEZI))
-    occupied_slots = set()
-    for p in alive:
-        try:
-            idx = active_processes.index(p)
-            occupied_slots.add(idx)
-        except ValueError:
-            continue
-            
-    free_slots = list(all_slots - occupied_slots)
-    
-    to_spawn = target - current_live
-    
-    if to_spawn > 0 and free_slots:
-        slots_to_fill = random.sample(free_slots, min(to_spawn, len(free_slots)))
-        for slot_index in slots_to_fill:
-            p = Process(target=keep_radio_alive, args=(RADIO_SINTEZI, REFERER_SINTEZI))
-            p.start()
-            # Вставляем новый процесс ровно в его слот
-            active_processes.insert(slot_index, p)
-            print(f"[SINTEZI-MANAGER] Spawned #{slot_index}")
-            
-    manager_sintezi_active[:] = alive
+def nevermind_manager_loop(active_list_ref, stop_event):
+    RADIO_NEVERMIND = "https://listen7.myradio24.com/nevermind"
+    REFERER_NEVERMIND = "https://source-nevermind.ru"
+    MAX_NEVERMIND = 30
+    while not stop_event.is_set():
+        time.sleep(CHECK_INTERVAL_SEC)
+        alive = [p for p in active_list_ref if p.is_alive()]
+        target = int(MAX_NEVERMIND * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
+        
+        all_slots = set(range(MAX_NEVERMIND))
+        occupied = set()
+        for p in alive:
+            try: occupied.add(active_list_ref.index(p))
+            except ValueError: continue
+        free = list(all_slots - occupied)
+        
+        to_spawn = target - len(alive)
+        if to_spawn > 0 and free:
+            slots_to_fill = random.sample(free, min(to_spawn, len(free)))
+            for slot_index in slots_to_fill:
+                p = Process(target=keep_radio_alive, args=(RADIO_NEVERMIND, REFERER_NEVERMIND))
+                p.start()
+                active_list_ref.insert(slot_index, p)
+                print(f"[NEVERMIND-MANAGER] Spawned #{slot_index}")
 
-# --- СТАНЦИЯ 2: nevermind ---
-RADIO_NEVERMIND = "https://listen7.myradio24.com/nevermind"
-MAX_NEVERMIND = 30
-REFERER_NEVERMIND = "https://source-nevermind.ru"
-manager_nevermind_active = []
+def rockataka_manager_loop(active_list_ref, stop_event):
+    RADIO_ROCKATAKA = "https://listen7.myradio24.com/rockataka"
+    REFERER_ROCKATAKA = "https://source-rockataka.ru"
+    MAX_ROCKATAKA = 8
+    while not stop_event.is_set():
+        time.sleep(CHECK_INTERVAL_SEC)
+        alive = [p for p in active_list_ref if p.is_alive()]
+        target = int(MAX_ROCKATAKA * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
+        
+        all_slots = set(range(MAX_ROCKATAKA))
+        occupied = set()
+        for p in alive:
+            try: occupied.add(active_list_ref.index(p))
+            except ValueError: continue
+        free = list(all_slots - occupied)
+        
+        to_spawn = target - len(alive)
+        if to_spawn > 0 and free:
+            slots_to_fill = random.sample(free, min(to_spawn, len(free)))
+            for slot_index in slots_to_fill:
+                p = Process(target=keep_radio_alive, args=(RADIO_ROCKATAKA, REFERER_ROCKATAKA))
+                p.start()
+                active_list_ref.insert(slot_index, p)
+                print(f"[ROCKATAKA-MANAGER] Spawned #{slot_index}")
 
-def get_target_nevermind():
-    utc_hour = datetime.now(timezone.utc).hour
-    percent = TARGET_PERCENT_BY_HOUR[utc_hour]
-    return int(MAX_NEVERMIND * (percent / 100))
-
-def scheduler_nevermind(active_processes):
-    alive = [p for p in active_processes if p.is_alive()]
-    target = get_target_nevermind()
-    current_live = len(alive)
-    
-    all_slots = set(range(MAX_NEVERMIND))
-    occupied_slots = set()
-    for p in alive:
-        try:
-            idx = active_processes.index(p)
-            occupied_slots.add(idx)
-        except ValueError:
-            continue
-            
-    free_slots = list(all_slots - occupied_slots)
-    
-    to_spawn = target - current_live
-    
-    if to_spawn > 0 and free_slots:
-        slots_to_fill = random.sample(free_slots, min(to_spawn, len(free_slots)))
-        for slot_index in slots_to_fill:
-            p = Process(target=keep_radio_alive, args=(RADIO_NEVERMIND, REFERER_NEVERMIND))
-            p.start()
-            active_processes.insert(slot_index, p)
-            print(f"[NEVERMIND-MANAGER] Spawned #{slot_index}")
-            
-    manager_nevermind_active[:] = alive
-
-# --- СТАНЦИЯ 3: rockataka ---
-RADIO_ROCKATAKA = "https://listen7.myradio24.com/rockataka"
-MAX_ROCKATAKA = 8
-REFERER_ROCKATAKA = "https://source-rockataka.ru"
-manager_rockataka_active = []
-
-def get_target_rockataka():
-    utc_hour = datetime.now(timezone.utc).hour
-    percent = TARGET_PERCENT_BY_HOUR[utc_hour]
-    return int(MAX_ROCKATAKA * (percent / 100))
-
-def scheduler_rockataka(active_processes):
-    alive = [p for p in active_processes if p.is_alive()]
-    target = get_target_rockataka()
-    current_live = len(alive)
-    
-    all_slots = set(range(MAX_ROCKATAKA))
-    occupied_slots = set()
-    for p in alive:
-        try:
-            idx = active_processes.index(p)
-            occupied_slots.add(idx)
-        except ValueError:
-            continue
-            
-    free_slots = list(all_slots - occupied_slots)
-    
-    to_spawn = target - current_live
-    
-    if to_spawn > 0 and free_slots:
-        slots_to_fill = random.sample(free_slots, min(to_spawn, len(free_slots)))
-        for slot_index in slots_to_fill:
-            p = Process(target=keep_radio_alive, args=(RADIO_ROCKATAKA, REFERER_ROCKATAKA))
-            p.start()
-            active_processes.insert(slot_index, p)
-            print(f"[ROCKATAKA-MANAGER] Spawned #{slot_index}")
-            
-    manager_rockataka_active[:] = alive
-
-# --- СТАНЦИЯ 4: iridium ---
-RADIO_IRIDIUM = "https://listen7.myradio24.com/iridium"
-MAX_IRIDIUM = 10
-REFERER_IRIDIUM = "https://source-iridium.ru"
-manager_iridium_active = []
-
-def get_target_iridium():
-    utc_hour = datetime.now(timezone.utc).hour
-    percent = TARGET_PERCENT_BY_HOUR[utc_hour]
-    return int(MAX_IRIDIUM * (percent / 100))
-
-def scheduler_iridium(active_processes):
-    alive = [p for p in active_processes if p.is_alive()]
-    target = get_target_iridium()
-    current_live = len(alive)
-    
-    all_slots = set(range(MAX_IRIDIUM))
-    occupied_slots = set()
-    for p in alive:
-        try:
-            idx = active_processes.index(p)
-            occupied_slots.add(idx)
-        except ValueError:
-            continue
-            
-    free_slots = list(all_slots - occupied_slots)
-    
-    to_spawn = target - current_live
-    
-    if to_spawn > 0 and free_slots:
-        slots_to_fill = random.sample(free_slots, min(to_spawn, len(free_slots)))
-        for slot_index in slots_to_fill:
-            p = Process(target=keep_radio_alive, args=(RADIO_IRIDIUM, REFERER_IRIDIUM))
-            p.start()
-            active_processes.insert(slot_index, p)
-            print(f"[IRIDIUM-MANAGER] Spawned #{slot_index}")
-            
-    manager_iridium_active[:] = alive
-
+def iridium_manager_loop(active_list_ref, stop_event):
+    RADIO_IRIDIUM = "https://listen7.myradio24.com/iridium"
+    REFERER_IRIDIUM = "https://source-iridium.ru"
+    MAX_IRIDIUM = 10
+    while not stop_event.is_set():
+        time.sleep(CHECK_INTERVAL_SEC)
+        alive = [p for p in active_list_ref if p.is_alive()]
+        target = int(MAX_IRIDIUM * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
+        
+        all_slots = set(range(MAX_IRIDIUM))
+        occupied = set()
+        for p in alive:
+            try: occupied.add(active_list_ref.index(p))
+            except ValueError: continue
+        free = list(all_slots - occupied)
+        
+        to_spawn = target - len(alive)
+        if to_spawn > 0 and free:
+            slots_to_fill = random.sample(free, min(to_spawn, len(free)))
+            for slot_index in slots_to_fill:
+                p = Process(target=keep_radio_alive, args=(RADIO_IRIDIUM, REFERER_IRIDIUM))
+                p.start()
+                active_list_ref.insert(slot_index, p)
+                print(f"[IRIDIUM-MANAGER] Spawned #{slot_index}")
 
 if __name__ == "__main__":
-    init_sin = get_target_sintezi()
-    init_nev = get_target_nevermind()
-    init_roc = get_target_rockataka()
-    init_iri = get_target_iridium()
+    manager_sintezi_active = []
+    manager_nevermind_active = []
+    manager_rockataka_active = []
+    manager_iridium_active = []
+    
+    # Событие для корректной остановки демонов
+    stop_event = Event()
+
+    # Запускаем менеджеров как ОТДЕЛЬНЫЕ долгоживущие процессы-демоны
+    m1 = Process(target=sintezi_manager_loop, args=(manager_sintezi_active, stop_event), daemon=True)
+    m2 = Process(target=nevermind_manager_loop, args=(manager_nevermind_active, stop_event), daemon=True)
+    m3 = Process(target=rockataka_manager_loop, args=(manager_rockataka_active, stop_event), daemon=True)
+    m4 = Process(target=iridium_manager_loop, args=(manager_iridium_active, stop_event), daemon=True)
+    
+    m1.start(); m2.start(); m3.start(); m4.start()
+    
+    # Первоначальный запуск (заполнение слотов сразу после старта)
+    init_sin = int(31 * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
+    init_nev = int(30 * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
+    init_roc = int(8 * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
+    init_iri = int(10 * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
     print(f"[INIT] Starting at Sintezi:{init_sin} Nevermind:{init_nev} Rockataka:{init_roc} Iridium:{init_iri}")
     
-    scheduler_sintezi(manager_sintezi_active)
-    scheduler_nevermind(manager_nevermind_active)
-    scheduler_rockataka(manager_rockataka_active)
-    scheduler_iridium(manager_iridium_active)
+    scheduler_snapshot = lambda lst, radio, ref, max_lis: [
+        Process(target=keep_radio_alive, args=(radio, ref)).start() or lst.append(_) 
+        for _ in range(int(max_lis * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100)))
+    ]
+    # Используем обычный цикл вместо сложной list comprehension для надежности инициализации
+    for _ in range(init_sin): p = Process(target=keep_radio_alive, args=(RADIO_SINTEZI if 'SINTEZI' in locals() else "", REFERER_SINTEZI)); p.start(); manager_sintezi_active.append(p)
+    for _ in range(init_nev): p = Process(target=keep_radio_alive, args=(RADIO_NEVERMIND if 'NEVERMIND' in locals() else "", REFERER_NEVERMIND)); p.start(); manager_nevermind_active.append(p)
+    for _ in range(init_roc): p = Process(target=keep_radio_alive, args=(RADIO_ROCKATAKA if 'ROCKATAKA' in locals() else "", REFERER_ROCKATAKA)); p.start(); manager_rockataka_active.append(p)
+    for _ in range(init_iri): p = Process(target=keep_radio_alive, args=(RADIO_IRIDIUM if 'IRIDIUM' in locals() else "", REFERER_IRIDIUM)); p.start(); manager_iridium_active.append(p)
 
     try:
         while True:
-            time.sleep(CHECK_INTERVAL_SEC)
-            
-            s_alive = [p for p in manager_sintezi_active if p.is_alive()]
-            n_alive = [p for p in manager_nevermind_active if p.is_alive()]
-            r_alive = [p for p in manager_rockataka_active if p.is_alive()]
-            i_alive = [p for p in manager_iridium_active if p.is_alive()]
-            
-            manager_sintezi_active[:] = s_alive
-            manager_nevermind_active[:] = n_alive
-            manager_rockataka_active[:] = r_alive
-            manager_iridium_active[:] = i_alive
-
-            new_sin = get_target_sintezi()
-            new_nev = get_target_nevermind()
-            new_roc = get_target_rockataka()
-            new_iri = get_target_iridium()
-
-            if len(s_alive) != new_sin or len(n_alive) != new_nev or len(r_alive) != new_roc or len(i_alive) != new_iri:
-                timestamp = time.strftime('%H:%M:%S')
-                print(f"[{timestamp}] GLOBAL ADJUSTMENT DETECTED.")
-                scheduler_sintezi(manager_sintezi_active)
-                scheduler_nevermind(manager_nevermind_active)
-                scheduler_rockataka(manager_rockataka_active)
-                scheduler_iridium(manager_iridium_active)
-
+            time.sleep(60) # Главный поток просто спит, его единственная задача - ждать Ctrl+C
     except KeyboardInterrupt:
-        print("\n[MAIN] Shutdown signal received. Terminating all substation managers...")
+        print("\n[MAIN] Shutdown signal received.")
+        stop_event.set() # Сигналим демонам остановиться
+        time.sleep(2)    # Даем им долю секунды на выход из sleep
+        
         for station_list in [manager_sintezi_active, manager_nevermind_active, manager_rockataka_active, manager_iridium_active]:
             for p in station_list:
                 if p.is_alive():
                     p.terminate()
                     p.join(timeout=5)
-                    if p.is_alive():
-                        p.kill()
+                    if p.is_alive(): p.kill()
