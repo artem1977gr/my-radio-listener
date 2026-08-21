@@ -1,4 +1,5 @@
 import socket
+import ssl  # <-- Добавлен импорт для шифрования
 import time
 from urllib.parse import urlparse
 from multiprocessing import Process, current_process
@@ -9,7 +10,6 @@ from datetime import datetime, timezone
 # --- ВАШИ НАСТРОЙКИ (МЕНЯЙТЕ ЗДЕСЬ) ---
 
 # 1. Список станций. Дублируйте URL столько раз, сколько веса хотите дать станции.
-#    Например, sintezi имеет вес 31, rockataka — 8 и так далее.
 RADIOS = [
     *(['https://listen7.myradio24.com/sintezi'] * 31),
     *(['https://listen7.myradio24.com/nevermind'] * 30),
@@ -18,13 +18,8 @@ RADIOS = [
     *(['https://listen7.myradio24.com/63908'] * 30)
 ]
 
-# Чтобы добавить новую станцию: просто добавьте новую строку по аналогии.
-# Например, для новой станции весом 5:
-# *(['НОВЫЙ_URL_ЗДЕСЬ'] * 5)
-
-
 # 2. Базовый сайт-реферер
-REFERER_URL = "https://fmradiofree.com"
+REFERER_URL = "https://www.fmradiofree.com"
 
 # 3. Длительность сессии одного потока (в секундах)
 SESSION_DURATION_MIN = 100   
@@ -85,7 +80,7 @@ def keep_radio_alive(url):
 
     headers = (
         f"GET {path} HTTP/1.1\r\n"
-        f"Host: {host}\r\n"
+        f"Host: {host}:443\r\n"  # Обязательно указываем порт в Host
         f"Icy-MetaData: 1\r\n"
         f"User-Agent: {generate_user_agent()}\r\n"
         f"Referer: {REFERER_URL}\r\n"
@@ -96,40 +91,45 @@ def keep_radio_alive(url):
     while True:  
         session_duration = random.randint(SESSION_DURATION_MIN, SESSION_DURATION_MAX)
         try:
-            with socket.create_connection((host, 80)) as sock:
-                sock.settimeout(READ_TIMEOUT_SEC)
-                sock.sendall(headers.encode())
-                
-                response_headers = b""
-                while True:
-                    chunk = sock.recv(4096)
-                    if not chunk or b"\r\n\r\n" in response_headers:
-                        break
-                    response_headers += chunk
+            # Создаем базовое TCP-соединение на стандартный HTTPS-порт
+            raw_sock = socket.create_connection((host, 443))
+            
+            # Оборачиваем его в слой шифрования SSL/TLS
+            sock = ssl.wrap_socket(raw_sock)
+            
+            sock.settimeout(READ_TIMEOUT_SEC)
+            sock.sendall(headers.encode())
+            
+            response_headers = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk or b"\r\n\r\n" in response_headers:
+                    break
+                response_headers += chunk
 
-                start_time = time.time()
-                proc_name = current_process().name
-                while int(time.time() - start_time) < session_duration:
-                    try:
-                        sock.recv(1024)
-                    except socket.timeout:
-                        pass
-                    except Exception as e:
-                        print(f"[{time.strftime('%H:%M:%S')}] [{proc_name}] Read error for {url}: {e}")
-                        break
+            start_time = time.time()
+            proc_name = current_process().name
+            while int(time.time() - start_time) < session_duration:
+                try:
+                    sock.recv(1024)
+                except socket.timeout:
+                    pass
+                except Exception as e:
+                    print(f"[{time.strftime('%H:%M:%S')}] [{proc_name}] Read error for {url}: {e}")
+                    break
         except Exception as e:
             print(f"[{time.strftime('%H:%M:%S')}] [{current_process().name}] Connection error for {url}: {e}. Reconnecting...")
+        finally:
+            # Гарантированное закрытие сокета при любом исходе
+            try:
+                sock.close()
+            except Exception:
+                pass
 
 
 def get_target_listeners_for_now():
-    """
-    Получает целевое число слушателей как процент от текущего размера списка RADIOS.
-    Пересчитывается динамически при каждом вызове.
-    """
     utc_hour = datetime.now(timezone.utc).hour
     percent = TARGET_PERCENT_BY_HOUR[utc_hour]
-    
-    # База берется из актуальной длины массива RADIOS прямо сейчас
     base_listeners = len(RADIOS)
     target_count = int(base_listeners * (percent / 100))
     return target_count, base_listeners
@@ -137,20 +137,14 @@ def get_target_listeners_for_now():
 
 def scheduler_manager(active_processes):
     alive_processes = [p for p in active_processes if p.is_alive()]
-    
-    new_target, base_listeners = get_target_listeners_for_now()
-    
-    # Максимум не может быть больше физического количества доступных URL
+    new_target, _ = get_target_listeners_for_now()
     max_possible_listeners = len(RADIOS)
     target_count = min(new_target, max_possible_listeners)
-
     current_live = len(alive_processes)
 
     #### ДОБОР ПРОЦЕССОВ ####
     if to_spawn := target_count - current_live > 0:
-        # Создаем пул свободных индексов на основе актуального RADIOS
         free_slots = set(range(len(RADIOS))) - {active_processes.index(p) for p in alive_processes if p in active_processes}
-        
         slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
         for slot_index in slots_to_fill:
             radio_url = RADIOS[slot_index]
@@ -176,25 +170,19 @@ def scheduler_manager(active_processes):
 
 if __name__ == "__main__":
     manager_active = []
-    
     initial_target, _ = get_target_listeners_for_now()
     print(f"[INIT] Starting at {initial_target} listeners based on current UTC hour.")
-    
-    # Первоначальный запуск
     manager_active = scheduler_manager(manager_active)
 
     try:
         while True:
             time.sleep(CHECK_INTERVAL_SEC)
-            
             new_target, _ = get_target_listeners_for_now()
             alive_processes = [p for p in manager_active if p.is_alive()]
-            
             if current_live := len(alive_processes) != new_target:
                 timestamp = time.strftime('%H:%M:%S')
                 print(f"[{timestamp}] Schedule change detected. Target: {new_target}, Live: {current_live}. Adjusting...")
                 manager_active = scheduler_manager(alive_processes)
-
     except KeyboardInterrupt:
         print("\n[MAIN] Shutdown signal received. Terminating all processes...")
         for p in manager_active:
