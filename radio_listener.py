@@ -114,29 +114,27 @@ def keep_radio_alive(url, referer_url):
             mins, secs = divmod(elapsed, 60)
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
-# --- МЕНЕДЖЕРЫ-ДЕМОНЫ (теперь они НЕ daemon, а просто функции для запуска в процессах) ---
+# --- ИСПРАВЛЕННЫЕ МЕНЕДЖЕРЫ-ДЕМОНЫ ---
 
 def sintezi_manager_loop(command_queue, stop_event):
     active_listeners = []
     while not stop_event.is_set():
-        try:
-            cmd = command_queue.get(timeout=1)
-            if cmd == "kill_all":
-                for p in active_listeners:
-                    if p.is_alive(): p.terminate(); p.join(timeout=5); p.kill()
-                active_listeners.clear()
-                continue
-            elif isinstance(cmd, tuple) and cmd[0] == "spawn":
-                slot_index = cmd[1]
-                p = Process(target=keep_radio_alive, args=(RADIO_SINTEZI, REFERER_SINTEZI))
-                p.start()
-                active_listeners.insert(slot_index, p)
-                print(f"[SINTEZI-MANAGER] Spawned #{slot_index}")
-        except Exception:
-            pass
-            
-        # Регулярная проверка каждые 5 минут
+        # Обработка входящих команд (создание слушателей) без блокировки основного цикла
+        while True:
+            try:
+                cmd = command_queue.get_nowait()
+                if isinstance(cmd, tuple) and cmd[0] == "spawn":
+                    slot_index = cmd[1]
+                    p = Process(target=keep_radio_alive, args=(RADIO_SINTEZI, REFERER_SINTEZI))
+                    p.start()
+                    active_listeners.insert(slot_index, p)
+                    print(f"[SINTEZI-MANAGER] Spawned #{slot_index}")
+            except Exception:
+                break
+        
+        # Регулярная проверка баланса каждые 5 минут
         time.sleep(CHECK_INTERVAL_SEC)
+        
         alive = [p for p in active_listeners if p.is_alive()]
         target = int(MAX_SINTEZI * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
         
@@ -151,7 +149,10 @@ def sintezi_manager_loop(command_queue, stop_event):
             
         # Добираем недостающих
         all_slots = set(range(MAX_SINTEZI))
-        occupied = set(active_listeners.index(p) for p in alive if p in active_listeners)
+        occupied = set()
+        for p in alive:
+            try: occupied.add(active_listeners.index(p))
+            except ValueError: continue
         free = list(all_slots - occupied)
         
         current_live = len(alive)
@@ -161,24 +162,21 @@ def sintezi_manager_loop(command_queue, stop_event):
             for slot_index in slots_to_fill:
                 command_queue.put(("spawn", slot_index))
 
-# Остальные три менеджера идентичны по логике (меняются только константы MAX_* и RADIO_*)
+# Остальные три менеджера идентичны по структуре
 def nevermind_manager_loop(command_queue, stop_event):
     active_listeners = []
     while not stop_event.is_set():
-        try:
-            cmd = command_queue.get(timeout=1)
-            if cmd == "kill_all":
-                for p in active_listeners:
-                    if p.is_alive(): p.terminate(); p.join(timeout=5); p.kill()
-                active_listeners.clear()
-            elif isinstance(cmd, tuple) and cmd[0] == "spawn":
-                slot_index = cmd[1]
-                p = Process(target=keep_radio_alive, args=(RADIO_NEVERMIND, REFERER_NEVERMIND))
-                p.start()
-                active_listeners.insert(slot_index, p)
-                print(f"[NEVERMIND-MANAGER] Spawned #{slot_index}")
-        except Exception:
-            pass
+        while True:
+            try:
+                cmd = command_queue.get_nowait()
+                if isinstance(cmd, tuple) and cmd[0] == "spawn":
+                    slot_index = cmd[1]
+                    p = Process(target=keep_radio_alive, args=(RADIO_NEVERMIND, REFERER_NEVERMIND))
+                    p.start()
+                    active_listeners.insert(slot_index, p)
+                    print(f"[NEVERMIND-MANAGER] Spawned #{slot_index}")
+            except Exception:
+                break
         time.sleep(CHECK_INTERVAL_SEC)
         alive = [p for p in active_listeners if p.is_alive()]
         target = int(MAX_NEVERMIND * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
@@ -190,7 +188,10 @@ def nevermind_manager_loop(command_queue, stop_event):
             active_listeners = alive[to_kill:]
             print(f"[NEVERMIND-MANAGER] Killed {to_kill} excess listeners.")
         all_slots = set(range(MAX_NEVERMIND))
-        occupied = set(active_listeners.index(p) for p in alive if p in active_listeners)
+        occupied = set()
+        for p in alive:
+            try: occupied.add(active_listeners.index(p))
+            except ValueError: continue
         free = list(all_slots - occupied)
         current_live = len(alive)
         to_spawn = target - current_live
@@ -202,20 +203,17 @@ def nevermind_manager_loop(command_queue, stop_event):
 def rockataka_manager_loop(command_queue, stop_event):
     active_listeners = []
     while not stop_event.is_set():
-        try:
-            cmd = command_queue.get(timeout=1)
-            if cmd == "kill_all":
-                for p in active_listeners:
-                    if p.is_alive(): p.terminate(); p.join(timeout=5); p.kill()
-                active_listeners.clear()
-            elif isinstance(cmd, tuple) and cmd[0] == "spawn":
-                slot_index = cmd[1]
-                p = Process(target=keep_radio_alive, args=(RADIO_ROCKATAKA, REFERER_ROCKATAKA))
-                p.start()
-                active_listeners.insert(slot_index, p)
-                print(f"[ROCKATAKA-MANAGER] Spawned #{slot_index}")
-        except Exception:
-            pass
+        while True:
+            try:
+                cmd = command_queue.get_nowait()
+                if isinstance(cmd, tuple) and cmd[0] == "spawn":
+                    slot_index = cmd[1]
+                    p = Process(target=keep_radio_alive, args=(RADIO_ROCKATAKA, REFERER_ROCKATAKA))
+                    p.start()
+                    active_listeners.insert(slot_index, p)
+                    print(f"[ROCKATAKA-MANAGER] Spawned #{slot_index}")
+            except Exception:
+                break
         time.sleep(CHECK_INTERVAL_SEC)
         alive = [p for p in active_listeners if p.is_alive()]
         target = int(MAX_ROCKATAKA * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
@@ -227,7 +225,10 @@ def rockataka_manager_loop(command_queue, stop_event):
             active_listeners = alive[to_kill:]
             print(f"[ROCKATAKA-MANAGER] Killed {to_kill} excess listeners.")
         all_slots = set(range(MAX_ROCKATAKA))
-        occupied = set(active_listeners.index(p) for p in alive if p in active_listeners)
+        occupied = set()
+        for p in alive:
+            try: occupied.add(active_listeners.index(p))
+            except ValueError: continue
         free = list(all_slots - occupied)
         current_live = len(alive)
         to_spawn = target - current_live
@@ -239,20 +240,17 @@ def rockataka_manager_loop(command_queue, stop_event):
 def iridium_manager_loop(command_queue, stop_event):
     active_listeners = []
     while not stop_event.is_set():
-        try:
-            cmd = command_queue.get(timeout=1)
-            if cmd == "kill_all":
-                for p in active_listeners:
-                    if p.is_alive(): p.terminate(); p.join(timeout=5); p.kill()
-                active_listeners.clear()
-            elif isinstance(cmd, tuple) and cmd[0] == "spawn":
-                slot_index = cmd[1]
-                p = Process(target=keep_radio_alive, args=(RADIO_IRIDIUM, REFERER_IRIDIUM))
-                p.start()
-                active_listeners.insert(slot_index, p)
-                print(f"[IRIDIUM-MANAGER] Spawned #{slot_index}")
-        except Exception:
-            pass
+        while True:
+            try:
+                cmd = command_queue.get_nowait()
+                if isinstance(cmd, tuple) and cmd[0] == "spawn":
+                    slot_index = cmd[1]
+                    p = Process(target=keep_radio_alive, args=(RADIO_IRIDIUM, REFERER_IRIDIUM))
+                    p.start()
+                    active_listeners.insert(slot_index, p)
+                    print(f"[IRIDIUM-MANAGER] Spawned #{slot_index}")
+            except Exception:
+                break
         time.sleep(CHECK_INTERVAL_SEC)
         alive = [p for p in active_listeners if p.is_alive()]
         target = int(MAX_IRIDIUM * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
@@ -264,7 +262,10 @@ def iridium_manager_loop(command_queue, stop_event):
             active_listeners = alive[to_kill:]
             print(f"[IRIDIUM-MANAGER] Killed {to_kill} excess listeners.")
         all_slots = set(range(MAX_IRIDIUM))
-        occupied = set(active_listeners.index(p) for p in alive if p in active_listeners)
+        occupied = set()
+        for p in alive:
+            try: occupied.add(active_listeners.index(p))
+            except ValueError: continue
         free = list(all_slots - occupied)
         current_live = len(alive)
         to_spawn = target - current_live
@@ -274,11 +275,9 @@ def iridium_manager_loop(command_queue, stop_event):
                 command_queue.put(("spawn", slot_index))
 
 if __name__ == "__main__":
-    # Очереди команд для каждого менеджера
     q_sin, q_nev, q_roc, q_iri = Queue(), Queue(), Queue(), Queue()
     stop_event = Event()
 
-    # Запуск менеджеров как обычных процессов (без daemon=True)
     m1 = Process(target=sintezi_manager_loop, args=(q_sin, stop_event))
     m2 = Process(target=nevermind_manager_loop, args=(q_nev, stop_event))
     m3 = Process(target=rockataka_manager_loop, args=(q_roc, stop_event))
@@ -286,7 +285,7 @@ if __name__ == "__main__":
     
     m1.start(); m2.start(); m3.start(); m4.start()
     
-    # ПЕРВИЧНАЯ ИНИЦИАЛИЗАЦИЯ через команды
+    # ПЕРВИЧНАЯ ИНИЦИАЛИЗАЦИЯ через команды с задержкой для старта ОС-процессов
     init_sin = int(MAX_SINTEZI * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
     init_nev = int(MAX_NEVERMIND * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
     init_roc = int(MAX_ROCKATAKA * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
@@ -294,10 +293,13 @@ if __name__ == "__main__":
     
     print(f"[INIT] Starting at Sintezi:{init_sin} Nevermind:{init_nev} Rockataka:{init_roc} Iridium:{init_iri}")
     
-    for i in range(init_sin): q_sin.put(("spawn", i))
-    for i in range(init_nev): q_nev.put(("spawn", i))
-    for i in range(init_roc): q_roc.put(("spawn", i))
-    for i in range(init_iri): q_iri.put(("spawn", i))
+    for i in range(init_sin): q_sin.put(("spawn", i)); time.sleep(0.01)
+    for i in range(init_nev): q_nev.put(("spawn", i)); time.sleep(0.01)
+    for i in range(init_roc): q_roc.put(("spawn", i)); time.sleep(0.01)
+    for i in range(init_iri): q_iri.put(("spawn", i)); time.sleep(0.01)
+
+    # Даем менеджерам секунду на первичный запуск всех детей перед первой проверкой
+    time.sleep(1)
 
     try:
         while True:
@@ -306,11 +308,11 @@ if __name__ == "__main__":
         print("\n[MAIN] Shutdown signal received.")
         stop_event.set()
         
-        # Чистим все очереди, чтобы менеджеры не зависли на .get()
+        # Чистим очереди, чтобы .get_nowait() не генерировал исключения после остановки
         for q in [q_sin, q_nev, q_roc, q_iri]:
-            while not q.empty(): q.get()
-        # Шлем команду экстренной очистки
-        q_sin.put("kill_all"); q_nev.put("kill_all"); q_roc.put("kill_all"); q_iri.put("kill_all")
+            while not q.empty(): 
+                try: q.get_nowait()
+                except Exception: break
         
         time.sleep(3)
         for p in [m1, m2, m3, m4]:
