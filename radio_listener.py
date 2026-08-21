@@ -19,7 +19,7 @@ TARGET_PERCENT_BY_HOUR = {
     16: 88, 17: 75, 18: 65, 19: 50, 20: 40, 21: 35, 22: 30, 23: 25
 }
 
-# --- КОНСТАНТЫ СТАНЦИЙ (вынесены наверх для доступности) ---
+# --- ГЛОБАЛЬНЫЕ КОНСТАНТЫ СТАНЦИЙ ---
 RADIO_SINTEZI = "https://listen7.myradio24.com/sintezi"
 REFERER_SINTEZI = "https://source-sintezi.ru"
 MAX_SINTEZI = 31
@@ -221,7 +221,7 @@ if __name__ == "__main__":
     
     m1.start(); m2.start(); m3.start(); m4.start()
     
-    # ПЕРВИЧНАЯ ИНИЦИАЛИЗАЦИЯ (теперь использует проверенные функции-менеджеры)
+    # ПЕРВИЧНАЯ ИНИЦИАЛИЗАЦИЯ (теперь использует прямые ссылки на глобальные константы)
     init_sin = int(MAX_SINTEZI * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
     init_nev = int(MAX_NEVERMIND * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
     init_roc = int(MAX_ROCKATAKA * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
@@ -229,14 +229,7 @@ if __name__ == "__main__":
     
     print(f"[INIT] Starting at Sintezi:{init_sin} Nevermind:{init_nev} Rockataka:{init_roc} Iridium:{init_iri}")
     
-    # Используем менеджеры для первичного заполнения пула вместо ручного создания процессов
-    temp_stop = Event()
-    scheduler_snapshot = lambda lst, func, radio, ref, max_lis: [
-        p := Process(target=keep_radio_alive, args=(radio, ref)), p.start(), lst.append(p)
-        for _ in range(int(max_lis * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100)))
-    ]
-    
-    # Надежная последовательная инициализация
+    # Надежная последовательная инициализация без условий и лямбд
     for _ in range(init_sin): 
         p = Process(target=keep_radio_alive, args=(RADIO_SINTEZI, REFERER_SINTEZI)); p.start(); manager_sintezi_active.append(p)
     for _ in range(init_nev): 
