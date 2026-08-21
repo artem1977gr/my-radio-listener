@@ -2,7 +2,7 @@ import socket
 import time
 import random
 from urllib.parse import urlparse
-from multiprocessing import Process, current_process, Event
+from multiprocessing import Process, Queue, Event, current_process
 from datetime import datetime, timezone
 
 #### ОБЩИЕ НАСТРОЙКИ ####
@@ -12,7 +12,7 @@ READ_TIMEOUT_SEC = 5
 CHECK_INTERVAL_SEC = 300     
 GRACEFUL_STOP_DELAY = 120    
 
-# ЕДИНЫЙ ГРАФИК ДЛЯ ВСЕХ СТАНЦИЙ (проценты от максимума)
+# ЕДИНЫЙ ГРАФИК ДЛЯ ВСЕХ СТАНЦИЙ
 TARGET_PERCENT_BY_HOUR = {
     0: 22, 1: 25, 2: 35, 3: 55, 4: 85, 5: 98, 6: 92, 7: 80,
     8: 75, 9: 78, 10: 76, 11: 74, 12: 77, 13: 82, 14: 90, 15: 100,
@@ -114,175 +114,179 @@ def keep_radio_alive(url, referer_url):
             mins, secs = divmod(elapsed, 60)
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
-# --- МЕНЕДЖЕРЫ-ДЕМОНЫ (с функцией удаления лишних слушателей) ---
+# --- МЕНЕДЖЕРЫ-ДЕМОНЫ (теперь они НЕ daemon, а просто функции для запуска в процессах) ---
 
-def sintezi_manager_loop(active_list_ref, stop_event):
+def sintezi_manager_loop(command_queue, stop_event):
+    active_listeners = []
     while not stop_event.is_set():
-        time.sleep(CHECK_INTERVAL_SEC)
-        
-        alive = [p for p in active_list_ref if p.is_alive()]
-        target = int(MAX_SINTEZI * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
-        
-        # УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ
-        to_kill = len(alive) - target
-        if to_kill > 0:
-            processes_to_kill = alive[:to_kill]
-            for p in processes_to_kill:
-                if p.is_alive():
-                    p.terminate()
-                    p.join(timeout=GRACEFUL_STOP_DELAY)
-                    if p.is_alive(): 
-                        p.kill()
-            active_list_ref[:] = alive[to_kill:]
-            print(f"[SINTEZI-MANAGER] Killed {to_kill} excess listeners.")
-            
-        # ДОБАВЛЕНИЕ НОВЫХ (если старые умерли сами)
-        all_slots = set(range(MAX_SINTEZI))
-        occupied = set()
-        for p in active_list_ref:
-            try: occupied.add(active_list_ref.index(p))
-            except ValueError: continue
-        free = list(all_slots - occupied)
-        
-        current_live = len([p for p in active_list_ref if p.is_alive()])
-        to_spawn = target - current_live
-        if to_spawn > 0 and free:
-            slots_to_fill = random.sample(free, min(to_spawn, len(free)))
-            for slot_index in slots_to_fill:
+        try:
+            cmd = command_queue.get(timeout=1)
+            if cmd == "kill_all":
+                for p in active_listeners:
+                    if p.is_alive(): p.terminate(); p.join(timeout=5); p.kill()
+                active_listeners.clear()
+                continue
+            elif isinstance(cmd, tuple) and cmd[0] == "spawn":
+                slot_index = cmd[1]
                 p = Process(target=keep_radio_alive, args=(RADIO_SINTEZI, REFERER_SINTEZI))
                 p.start()
-                active_list_ref.insert(slot_index, p)
+                active_listeners.insert(slot_index, p)
                 print(f"[SINTEZI-MANAGER] Spawned #{slot_index}")
-
-def nevermind_manager_loop(active_list_ref, stop_event):
-    while not stop_event.is_set():
+        except Exception:
+            pass
+            
+        # Регулярная проверка каждые 5 минут
         time.sleep(CHECK_INTERVAL_SEC)
+        alive = [p for p in active_listeners if p.is_alive()]
+        target = int(MAX_SINTEZI * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
         
-        alive = [p for p in active_list_ref if p.is_alive()]
-        target = int(MAX_NEVERMIND * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
-        
-        # УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ
+        # Убиваем лишних
         to_kill = len(alive) - target
         if to_kill > 0:
             processes_to_kill = alive[:to_kill]
             for p in processes_to_kill:
-                if p.is_alive():
-                    p.terminate()
-                    p.join(timeout=GRACEFUL_STOP_DELAY)
-                    if p.is_alive(): 
-                        p.kill()
-            active_list_ref[:] = alive[to_kill:]
-            print(f"[NEVERMIND-MANAGER] Killed {to_kill} excess listeners.")
+                if p.is_alive(): p.terminate(); p.join(timeout=GRACEFUL_STOP_DELAY); p.kill()
+            active_listeners = alive[to_kill:]
+            print(f"[SINTEZI-MANAGER] Killed {to_kill} excess listeners.")
             
-        all_slots = set(range(MAX_NEVERMIND))
-        occupied = set()
-        for p in active_list_ref:
-            try: occupied.add(active_list_ref.index(p))
-            except ValueError: continue
+        # Добираем недостающих
+        all_slots = set(range(MAX_SINTEZI))
+        occupied = set(active_listeners.index(p) for p in alive if p in active_listeners)
         free = list(all_slots - occupied)
         
-        current_live = len([p for p in active_list_ref if p.is_alive()])
+        current_live = len(alive)
         to_spawn = target - current_live
         if to_spawn > 0 and free:
             slots_to_fill = random.sample(free, min(to_spawn, len(free)))
             for slot_index in slots_to_fill:
+                command_queue.put(("spawn", slot_index))
+
+# Остальные три менеджера идентичны по логике (меняются только константы MAX_* и RADIO_*)
+def nevermind_manager_loop(command_queue, stop_event):
+    active_listeners = []
+    while not stop_event.is_set():
+        try:
+            cmd = command_queue.get(timeout=1)
+            if cmd == "kill_all":
+                for p in active_listeners:
+                    if p.is_alive(): p.terminate(); p.join(timeout=5); p.kill()
+                active_listeners.clear()
+            elif isinstance(cmd, tuple) and cmd[0] == "spawn":
+                slot_index = cmd[1]
                 p = Process(target=keep_radio_alive, args=(RADIO_NEVERMIND, REFERER_NEVERMIND))
                 p.start()
-                active_list_ref.insert(slot_index, p)
+                active_listeners.insert(slot_index, p)
                 print(f"[NEVERMIND-MANAGER] Spawned #{slot_index}")
-
-def rockataka_manager_loop(active_list_ref, stop_event):
-    while not stop_event.is_set():
+        except Exception:
+            pass
         time.sleep(CHECK_INTERVAL_SEC)
-        
-        alive = [p for p in active_list_ref if p.is_alive()]
-        target = int(MAX_ROCKATAKA * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
-        
-        # УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ
+        alive = [p for p in active_listeners if p.is_alive()]
+        target = int(MAX_NEVERMIND * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
         to_kill = len(alive) - target
         if to_kill > 0:
             processes_to_kill = alive[:to_kill]
             for p in processes_to_kill:
-                if p.is_alive():
-                    p.terminate()
-                    p.join(timeout=GRACEFUL_STOP_DELAY)
-                    if p.is_alive(): 
-                        p.kill()
-            active_list_ref[:] = alive[to_kill:]
-            print(f"[ROCKATAKA-MANAGER] Killed {to_kill} excess listeners.")
-            
-        all_slots = set(range(MAX_ROCKATAKA))
-        occupied = set()
-        for p in active_list_ref:
-            try: occupied.add(active_list_ref.index(p))
-            except ValueError: continue
+                if p.is_alive(): p.terminate(); p.join(timeout=GRACEFUL_STOP_DELAY); p.kill()
+            active_listeners = alive[to_kill:]
+            print(f"[NEVERMIND-MANAGER] Killed {to_kill} excess listeners.")
+        all_slots = set(range(MAX_NEVERMIND))
+        occupied = set(active_listeners.index(p) for p in alive if p in active_listeners)
         free = list(all_slots - occupied)
-        
-        current_live = len([p for p in active_list_ref if p.is_alive()])
+        current_live = len(alive)
         to_spawn = target - current_live
         if to_spawn > 0 and free:
             slots_to_fill = random.sample(free, min(to_spawn, len(free)))
             for slot_index in slots_to_fill:
+                command_queue.put(("spawn", slot_index))
+
+def rockataka_manager_loop(command_queue, stop_event):
+    active_listeners = []
+    while not stop_event.is_set():
+        try:
+            cmd = command_queue.get(timeout=1)
+            if cmd == "kill_all":
+                for p in active_listeners:
+                    if p.is_alive(): p.terminate(); p.join(timeout=5); p.kill()
+                active_listeners.clear()
+            elif isinstance(cmd, tuple) and cmd[0] == "spawn":
+                slot_index = cmd[1]
                 p = Process(target=keep_radio_alive, args=(RADIO_ROCKATAKA, REFERER_ROCKATAKA))
                 p.start()
-                active_list_ref.insert(slot_index, p)
+                active_listeners.insert(slot_index, p)
                 print(f"[ROCKATAKA-MANAGER] Spawned #{slot_index}")
-
-def iridium_manager_loop(active_list_ref, stop_event):
-    while not stop_event.is_set():
+        except Exception:
+            pass
         time.sleep(CHECK_INTERVAL_SEC)
-        
-        alive = [p for p in active_list_ref if p.is_alive()]
-        target = int(MAX_IRIDIUM * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
-        
-        # УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ
+        alive = [p for p in active_listeners if p.is_alive()]
+        target = int(MAX_ROCKATAKA * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
         to_kill = len(alive) - target
         if to_kill > 0:
             processes_to_kill = alive[:to_kill]
             for p in processes_to_kill:
-                if p.is_alive():
-                    p.terminate()
-                    p.join(timeout=GRACEFUL_STOP_DELAY)
-                    if p.is_alive(): 
-                        p.kill()
-            active_list_ref[:] = alive[to_kill:]
-            print(f"[IRIDIUM-MANAGER] Killed {to_kill} excess listeners.")
-            
-        all_slots = set(range(MAX_IRIDIUM))
-        occupied = set()
-        for p in active_list_ref:
-            try: occupied.add(active_list_ref.index(p))
-            except ValueError: continue
+                if p.is_alive(): p.terminate(); p.join(timeout=GRACEFUL_STOP_DELAY); p.kill()
+            active_listeners = alive[to_kill:]
+            print(f"[ROCKATAKA-MANAGER] Killed {to_kill} excess listeners.")
+        all_slots = set(range(MAX_ROCKATAKA))
+        occupied = set(active_listeners.index(p) for p in alive if p in active_listeners)
         free = list(all_slots - occupied)
-        
-        current_live = len([p for p in active_list_ref if p.is_alive()])
+        current_live = len(alive)
         to_spawn = target - current_live
         if to_spawn > 0 and free:
             slots_to_fill = random.sample(free, min(to_spawn, len(free)))
             for slot_index in slots_to_fill:
+                command_queue.put(("spawn", slot_index))
+
+def iridium_manager_loop(command_queue, stop_event):
+    active_listeners = []
+    while not stop_event.is_set():
+        try:
+            cmd = command_queue.get(timeout=1)
+            if cmd == "kill_all":
+                for p in active_listeners:
+                    if p.is_alive(): p.terminate(); p.join(timeout=5); p.kill()
+                active_listeners.clear()
+            elif isinstance(cmd, tuple) and cmd[0] == "spawn":
+                slot_index = cmd[1]
                 p = Process(target=keep_radio_alive, args=(RADIO_IRIDIUM, REFERER_IRIDIUM))
                 p.start()
-                active_list_ref.insert(slot_index, p)
+                active_listeners.insert(slot_index, p)
                 print(f"[IRIDIUM-MANAGER] Spawned #{slot_index}")
+        except Exception:
+            pass
+        time.sleep(CHECK_INTERVAL_SEC)
+        alive = [p for p in active_listeners if p.is_alive()]
+        target = int(MAX_IRIDIUM * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
+        to_kill = len(alive) - target
+        if to_kill > 0:
+            processes_to_kill = alive[:to_kill]
+            for p in processes_to_kill:
+                if p.is_alive(): p.terminate(); p.join(timeout=GRACEFUL_STOP_DELAY); p.kill()
+            active_listeners = alive[to_kill:]
+            print(f"[IRIDIUM-MANAGER] Killed {to_kill} excess listeners.")
+        all_slots = set(range(MAX_IRIDIUM))
+        occupied = set(active_listeners.index(p) for p in alive if p in active_listeners)
+        free = list(all_slots - occupied)
+        current_live = len(alive)
+        to_spawn = target - current_live
+        if to_spawn > 0 and free:
+            slots_to_fill = random.sample(free, min(to_spawn, len(free)))
+            for slot_index in slots_to_fill:
+                command_queue.put(("spawn", slot_index))
 
 if __name__ == "__main__":
-    manager_sintezi_active = []
-    manager_nevermind_active = []
-    manager_rockataka_active = []
-    manager_iridium_active = []
-    
-    # Событие для корректной остановки демонов
+    # Очереди команд для каждого менеджера
+    q_sin, q_nev, q_roc, q_iri = Queue(), Queue(), Queue(), Queue()
     stop_event = Event()
 
-    # Запускаем менеджеров как ОТДЕЛЬНЫЕ долгоживущие процессы-демоны
-    m1 = Process(target=sintezi_manager_loop, args=(manager_sintezi_active, stop_event), daemon=True)
-    m2 = Process(target=nevermind_manager_loop, args=(manager_nevermind_active, stop_event), daemon=True)
-    m3 = Process(target=rockataka_manager_loop, args=(manager_rockataka_active, stop_event), daemon=True)
-    m4 = Process(target=iridium_manager_loop, args=(manager_iridium_active, stop_event), daemon=True)
+    # Запуск менеджеров как обычных процессов (без daemon=True)
+    m1 = Process(target=sintezi_manager_loop, args=(q_sin, stop_event))
+    m2 = Process(target=nevermind_manager_loop, args=(q_nev, stop_event))
+    m3 = Process(target=rockataka_manager_loop, args=(q_roc, stop_event))
+    m4 = Process(target=iridium_manager_loop, args=(q_iri, stop_event))
     
     m1.start(); m2.start(); m3.start(); m4.start()
     
-    # ПЕРВИЧНАЯ ИНИЦИАЛИЗАЦИЯ (заполнение до целевого значения текущего часа)
+    # ПЕРВИЧНАЯ ИНИЦИАЛИЗАЦИЯ через команды
     init_sin = int(MAX_SINTEZI * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
     init_nev = int(MAX_NEVERMIND * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
     init_roc = int(MAX_ROCKATAKA * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
@@ -290,26 +294,24 @@ if __name__ == "__main__":
     
     print(f"[INIT] Starting at Sintezi:{init_sin} Nevermind:{init_nev} Rockataka:{init_roc} Iridium:{init_iri}")
     
-    for _ in range(init_sin): 
-        p = Process(target=keep_radio_alive, args=(RADIO_SINTEZI, REFERER_SINTEZI)); p.start(); manager_sintezi_active.append(p)
-    for _ in range(init_nev): 
-        p = Process(target=keep_radio_alive, args=(RADIO_NEVERMIND, REFERER_NEVERMIND)); p.start(); manager_nevermind_active.append(p)
-    for _ in range(init_roc): 
-        p = Process(target=keep_radio_alive, args=(RADIO_ROCKATAKA, REFERER_ROCKATAKA)); p.start(); manager_rockataka_active.append(p)
-    for _ in range(init_iri): 
-        p = Process(target=keep_radio_alive, args=(RADIO_IRIDIUM, REFERER_IRIDIUM)); p.start(); manager_iridium_active.append(p)
+    for i in range(init_sin): q_sin.put(("spawn", i))
+    for i in range(init_nev): q_nev.put(("spawn", i))
+    for i in range(init_roc): q_roc.put(("spawn", i))
+    for i in range(init_iri): q_iri.put(("spawn", i))
 
     try:
         while True:
-            time.sleep(60) # Главный поток просто спит, его единственная задача - ждать Ctrl+C
+            time.sleep(60)
     except KeyboardInterrupt:
         print("\n[MAIN] Shutdown signal received.")
-        stop_event.set() # Сигналим демонам остановиться
-        time.sleep(2)    # Даем им долю секунды на выход из sleep
+        stop_event.set()
         
-        for station_list in [manager_sintezi_active, manager_nevermind_active, manager_rockataka_active, manager_iridium_active]:
-            for p in station_list:
-                if p.is_alive():
-                    p.terminate()
-                    p.join(timeout=5)
-                    if p.is_alive(): p.kill()
+        # Чистим все очереди, чтобы менеджеры не зависли на .get()
+        for q in [q_sin, q_nev, q_roc, q_iri]:
+            while not q.empty(): q.get()
+        # Шлем команду экстренной очистки
+        q_sin.put("kill_all"); q_nev.put("kill_all"); q_roc.put("kill_all"); q_iri.put("kill_all")
+        
+        time.sleep(3)
+        for p in [m1, m2, m3, m4]:
+            if p.is_alive(): p.terminate(); p.join(timeout=5); p.kill()
