@@ -12,6 +12,13 @@ READ_TIMEOUT_SEC = 5
 CHECK_INTERVAL_SEC = 300     
 GRACEFUL_STOP_DELAY = 120    
 
+# ЕДИНЫЙ ГРАФИК ДЛЯ ВСЕХ СТАНЦИЙ (взято из вашего последнего сообщения)
+TARGET_PERCENT_BY_HOUR = {
+    0: 22, 1: 25, 2: 35, 3: 55, 4: 85, 5: 98, 6: 92, 7: 80,
+    8: 75, 9: 78, 10: 76, 11: 74, 12: 77, 13: 82, 14: 90, 15: 100,
+    16: 88, 17: 75, 18: 65, 19: 50, 20: 40, 21: 35, 22: 30, 23: 25
+}
+
 # Настройки User-Agent остаются общими для всех станций
 PLATFORM_WEIGHTS = [  
     {"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1},  
@@ -105,16 +112,11 @@ def keep_radio_alive(url, referer_url):
 RADIO_SINTEZI = "https://listen7.myradio24.com/sintezi"
 MAX_SINTEZI = 31
 REFERER_SINTEZI = "https://source-sintezi.ru"
-TARGET_PERCENT_BY_HOUR_SINTEZI = {
-    0: 23, 1: 26, 2: 35, 3: 55, 4: 84, 5: 97, 6: 94, 7: 81,
-    8: 74, 9: 77, 10: 77, 11: 74, 12: 77, 13: 81, 14: 90, 15: 100,
-    16: 87, 17: 74, 18: 65, 19: 52, 20: 39, 21: 35, 22: 29, 23: 26
-}
 manager_sintezi_active = []
 
 def get_target_sintezi():
     utc_hour = datetime.now(timezone.utc).hour
-    percent = TARGET_PERCENT_BY_HOUR_SINTEZI[utc_hour]
+    percent = TARGET_PERCENT_BY_HOUR[utc_hour]
     return int(MAX_SINTEZI * (percent / 100))
 
 def scheduler_sintezi(active_processes):
@@ -141,16 +143,11 @@ def scheduler_sintezi(active_processes):
 RADIO_NEVERMIND = "https://listen7.myradio24.com/nevermind"
 MAX_NEVERMIND = 30
 REFERER_NEVERMIND = "https://source-nevermind.ru"
-TARGET_PERCENT_BY_HOUR_NEVERMIND = {
-    0: 23, 1: 27, 2: 37, 3: 57, 4: 87, 5: 100, 6: 97, 7: 83,
-    8: 77, 9: 80, 10: 80, 11: 77, 12: 80, 13: 83, 14: 93, 15: 103,
-    16: 90, 17: 77, 18: 67, 19: 53, 20: 40, 21: 37, 22: 30, 23: 27
-}
 manager_nevermind_active = []
 
 def get_target_nevermind():
     utc_hour = datetime.now(timezone.utc).hour
-    percent = TARGET_PERCENT_BY_HOUR_NEVERMIND[utc_hour]
+    percent = TARGET_PERCENT_BY_HOUR[utc_hour]
     return int(MAX_NEVERMIND * (percent / 100))
 
 def scheduler_nevermind(active_processes):
@@ -177,16 +174,11 @@ def scheduler_nevermind(active_processes):
 RADIO_ROCKATAKA = "https://listen7.myradio24.com/rockataka"
 MAX_ROCKATAKA = 8
 REFERER_ROCKATAKA = "https://source-rockataka.ru"
-TARGET_PERCENT_BY_HOUR_ROCKATAKA = {
-    0: 25, 1: 25, 2: 38, 3: 50, 4: 88, 5: 100, 6: 88, 7: 75,
-    8: 75, 9: 75, 10: 75, 11: 75, 12: 75, 13: 88, 14: 88, 15: 100,
-    16: 88, 17: 75, 18: 62, 19: 50, 20: 38, 21: 38, 22: 25, 23: 25
-}
 manager_rockataka_active = []
 
 def get_target_rockataka():
     utc_hour = datetime.now(timezone.utc).hour
-    percent = TARGET_PERCENT_BY_HOUR_ROCKATAKA[utc_hour]
+    percent = TARGET_PERCENT_BY_HOUR[utc_hour]
     return int(MAX_ROCKATAKA * (percent / 100))
 
 def scheduler_rockataka(active_processes):
@@ -213,16 +205,11 @@ def scheduler_rockataka(active_processes):
 RADIO_IRIDIUM = "https://listen7.myradio24.com/iridium"
 MAX_IRIDIUM = 10
 REFERER_IRIDIUM = "https://source-iridium.ru"
-TARGET_PERCENT_BY_HOUR_IRIDIUM = {
-    0: 20, 1: 30, 2: 40, 3: 60, 4: 90, 5: 100, 6: 90, 7: 80,
-    8: 80, 9: 80, 10: 80, 11: 70, 12: 80, 13: 80, 14: 90, 15: 100,
-    16: 90, 17: 80, 18: 70, 19: 50, 20: 40, 21: 40, 22: 30, 23: 30
-}
 manager_iridium_active = []
 
 def get_target_iridium():
     utc_hour = datetime.now(timezone.utc).hour
-    percent = TARGET_PERCENT_BY_HOUR_IRIDIUM[utc_hour]
+    percent = TARGET_PERCENT_BY_HOUR[utc_hour]
     return int(MAX_IRIDIUM * (percent / 100))
 
 def scheduler_iridium(active_processes):
