@@ -19,8 +19,24 @@ TARGET_PERCENT_BY_HOUR = {
     16: 88, 17: 75, 18: 65, 19: 50, 20: 40, 21: 35, 22: 30, 23: 25
 }
 
+# --- КОНСТАНТЫ СТАНЦИЙ (вынесены наверх для доступности) ---
+RADIO_SINTEZI = "https://listen7.myradio24.com/sintezi"
+REFERER_SINTEZI = "https://source-sintezi.ru"
+MAX_SINTEZI = 31
+
+RADIO_NEVERMIND = "https://listen7.myradio24.com/nevermind"
+REFERER_NEVERMIND = "https://source-nevermind.ru"
+MAX_NEVERMIND = 30
+
+RADIO_ROCKATAKA = "https://listen7.myradio24.com/rockataka"
+REFERER_ROCKATAKA = "https://source-rockataka.ru"
+MAX_ROCKATAKA = 8
+
+RADIO_IRIDIUM = "https://listen7.myradio24.com/iridium"
+REFERER_IRIDIUM = "https://source-iridium.ru"
+MAX_IRIDIUM = 10
+
 def generate_user_agent():
-    # [Код генерации UA остается без изменений]
     PLATFORM_WEIGHTS = [{"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1}, {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
                         {"os": "Android", "version": "13", "arch": "SM-S901B", "weight": 0.3}, {"os": "iPhone", "version": "16_6", "model": "iPhone14,2", "weight": 0.2},
                         {"os": "Linux", "version": "x86_64", "weight": 0.05}, {"os": "X11", "version": "Ubuntu; Linux x86_64", "weight": 0.05}]
@@ -98,12 +114,9 @@ def keep_radio_alive(url, referer_url):
             mins, secs = divmod(elapsed, 60)
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
-# --- МЕНЕДЖЕРЫ-ДЕМОНЫ (Запускаются один раз и работают в фоне) ---
+# --- МЕНЕДЖЕРЫ-ДЕМОНЫ ---
 
 def sintezi_manager_loop(active_list_ref, stop_event):
-    RADIO_SINTEZI = "https://listen7.myradio24.com/sintezi"
-    REFERER_SINTEZI = "https://source-sintezi.ru"
-    MAX_SINTEZI = 31
     while not stop_event.is_set():
         time.sleep(CHECK_INTERVAL_SEC)
         alive = [p for p in active_list_ref if p.is_alive()]
@@ -126,9 +139,6 @@ def sintezi_manager_loop(active_list_ref, stop_event):
                 print(f"[SINTEZI-MANAGER] Spawned #{slot_index}")
 
 def nevermind_manager_loop(active_list_ref, stop_event):
-    RADIO_NEVERMIND = "https://listen7.myradio24.com/nevermind"
-    REFERER_NEVERMIND = "https://source-nevermind.ru"
-    MAX_NEVERMIND = 30
     while not stop_event.is_set():
         time.sleep(CHECK_INTERVAL_SEC)
         alive = [p for p in active_list_ref if p.is_alive()]
@@ -151,9 +161,6 @@ def nevermind_manager_loop(active_list_ref, stop_event):
                 print(f"[NEVERMIND-MANAGER] Spawned #{slot_index}")
 
 def rockataka_manager_loop(active_list_ref, stop_event):
-    RADIO_ROCKATAKA = "https://listen7.myradio24.com/rockataka"
-    REFERER_ROCKATAKA = "https://source-rockataka.ru"
-    MAX_ROCKATAKA = 8
     while not stop_event.is_set():
         time.sleep(CHECK_INTERVAL_SEC)
         alive = [p for p in active_list_ref if p.is_alive()]
@@ -176,9 +183,6 @@ def rockataka_manager_loop(active_list_ref, stop_event):
                 print(f"[ROCKATAKA-MANAGER] Spawned #{slot_index}")
 
 def iridium_manager_loop(active_list_ref, stop_event):
-    RADIO_IRIDIUM = "https://listen7.myradio24.com/iridium"
-    REFERER_IRIDIUM = "https://source-iridium.ru"
-    MAX_IRIDIUM = 10
     while not stop_event.is_set():
         time.sleep(CHECK_INTERVAL_SEC)
         alive = [p for p in active_list_ref if p.is_alive()]
@@ -217,22 +221,30 @@ if __name__ == "__main__":
     
     m1.start(); m2.start(); m3.start(); m4.start()
     
-    # Первоначальный запуск (заполнение слотов сразу после старта)
-    init_sin = int(31 * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
-    init_nev = int(30 * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
-    init_roc = int(8 * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
-    init_iri = int(10 * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
+    # ПЕРВИЧНАЯ ИНИЦИАЛИЗАЦИЯ (теперь использует проверенные функции-менеджеры)
+    init_sin = int(MAX_SINTEZI * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
+    init_nev = int(MAX_NEVERMIND * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
+    init_roc = int(MAX_ROCKATAKA * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
+    init_iri = int(MAX_IRIDIUM * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
+    
     print(f"[INIT] Starting at Sintezi:{init_sin} Nevermind:{init_nev} Rockataka:{init_roc} Iridium:{init_iri}")
     
-    scheduler_snapshot = lambda lst, radio, ref, max_lis: [
-        Process(target=keep_radio_alive, args=(radio, ref)).start() or lst.append(_) 
+    # Используем менеджеры для первичного заполнения пула вместо ручного создания процессов
+    temp_stop = Event()
+    scheduler_snapshot = lambda lst, func, radio, ref, max_lis: [
+        p := Process(target=keep_radio_alive, args=(radio, ref)), p.start(), lst.append(p)
         for _ in range(int(max_lis * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100)))
     ]
-    # Используем обычный цикл вместо сложной list comprehension для надежности инициализации
-    for _ in range(init_sin): p = Process(target=keep_radio_alive, args=(RADIO_SINTEZI if 'SINTEZI' in locals() else "", REFERER_SINTEZI)); p.start(); manager_sintezi_active.append(p)
-    for _ in range(init_nev): p = Process(target=keep_radio_alive, args=(RADIO_NEVERMIND if 'NEVERMIND' in locals() else "", REFERER_NEVERMIND)); p.start(); manager_nevermind_active.append(p)
-    for _ in range(init_roc): p = Process(target=keep_radio_alive, args=(RADIO_ROCKATAKA if 'ROCKATAKA' in locals() else "", REFERER_ROCKATAKA)); p.start(); manager_rockataka_active.append(p)
-    for _ in range(init_iri): p = Process(target=keep_radio_alive, args=(RADIO_IRIDIUM if 'IRIDIUM' in locals() else "", REFERER_IRIDIUM)); p.start(); manager_iridium_active.append(p)
+    
+    # Надежная последовательная инициализация
+    for _ in range(init_sin): 
+        p = Process(target=keep_radio_alive, args=(RADIO_SINTEZI, REFERER_SINTEZI)); p.start(); manager_sintezi_active.append(p)
+    for _ in range(init_nev): 
+        p = Process(target=keep_radio_alive, args=(RADIO_NEVERMIND, REFERER_NEVERMIND)); p.start(); manager_nevermind_active.append(p)
+    for _ in range(init_roc): 
+        p = Process(target=keep_radio_alive, args=(RADIO_ROCKATAKA, REFERER_ROCKATAKA)); p.start(); manager_rockataka_active.append(p)
+    for _ in range(init_iri): 
+        p = Process(target=keep_radio_alive, args=(RADIO_IRIDIUM, REFERER_IRIDIUM)); p.start(); manager_iridium_active.append(p)
 
     try:
         while True:
