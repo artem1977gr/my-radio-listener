@@ -12,7 +12,7 @@ READ_TIMEOUT_SEC = 5
 CHECK_INTERVAL_SEC = 300     
 GRACEFUL_STOP_DELAY = 120    
 
-# ЕДИНЫЙ ГРАФИК ДЛЯ ВСЕХ СТАНЦИЙ
+# ЕДИНЫЙ ГРАФИК ДЛЯ ВСЕХ СТАНЦИЙ (проценты от максимума)
 TARGET_PERCENT_BY_HOUR = {
     0: 22, 1: 25, 2: 35, 3: 55, 4: 85, 5: 98, 6: 92, 7: 80,
     8: 75, 9: 78, 10: 76, 11: 74, 12: 77, 13: 82, 14: 90, 15: 100,
@@ -114,22 +114,38 @@ def keep_radio_alive(url, referer_url):
             mins, secs = divmod(elapsed, 60)
             print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
 
-# --- МЕНЕДЖЕРЫ-ДЕМОНЫ ---
+# --- МЕНЕДЖЕРЫ-ДЕМОНЫ (с функцией удаления лишних слушателей) ---
 
 def sintezi_manager_loop(active_list_ref, stop_event):
     while not stop_event.is_set():
         time.sleep(CHECK_INTERVAL_SEC)
+        
         alive = [p for p in active_list_ref if p.is_alive()]
         target = int(MAX_SINTEZI * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
         
+        # УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ
+        to_kill = len(alive) - target
+        if to_kill > 0:
+            processes_to_kill = alive[:to_kill]
+            for p in processes_to_kill:
+                if p.is_alive():
+                    p.terminate()
+                    p.join(timeout=GRACEFUL_STOP_DELAY)
+                    if p.is_alive(): 
+                        p.kill()
+            active_list_ref[:] = alive[to_kill:]
+            print(f"[SINTEZI-MANAGER] Killed {to_kill} excess listeners.")
+            
+        # ДОБАВЛЕНИЕ НОВЫХ (если старые умерли сами)
         all_slots = set(range(MAX_SINTEZI))
         occupied = set()
-        for p in alive:
+        for p in active_list_ref:
             try: occupied.add(active_list_ref.index(p))
             except ValueError: continue
         free = list(all_slots - occupied)
         
-        to_spawn = target - len(alive)
+        current_live = len([p for p in active_list_ref if p.is_alive()])
+        to_spawn = target - current_live
         if to_spawn > 0 and free:
             slots_to_fill = random.sample(free, min(to_spawn, len(free)))
             for slot_index in slots_to_fill:
@@ -141,17 +157,32 @@ def sintezi_manager_loop(active_list_ref, stop_event):
 def nevermind_manager_loop(active_list_ref, stop_event):
     while not stop_event.is_set():
         time.sleep(CHECK_INTERVAL_SEC)
+        
         alive = [p for p in active_list_ref if p.is_alive()]
         target = int(MAX_NEVERMIND * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
         
+        # УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ
+        to_kill = len(alive) - target
+        if to_kill > 0:
+            processes_to_kill = alive[:to_kill]
+            for p in processes_to_kill:
+                if p.is_alive():
+                    p.terminate()
+                    p.join(timeout=GRACEFUL_STOP_DELAY)
+                    if p.is_alive(): 
+                        p.kill()
+            active_list_ref[:] = alive[to_kill:]
+            print(f"[NEVERMIND-MANAGER] Killed {to_kill} excess listeners.")
+            
         all_slots = set(range(MAX_NEVERMIND))
         occupied = set()
-        for p in alive:
+        for p in active_list_ref:
             try: occupied.add(active_list_ref.index(p))
             except ValueError: continue
         free = list(all_slots - occupied)
         
-        to_spawn = target - len(alive)
+        current_live = len([p for p in active_list_ref if p.is_alive()])
+        to_spawn = target - current_live
         if to_spawn > 0 and free:
             slots_to_fill = random.sample(free, min(to_spawn, len(free)))
             for slot_index in slots_to_fill:
@@ -163,17 +194,32 @@ def nevermind_manager_loop(active_list_ref, stop_event):
 def rockataka_manager_loop(active_list_ref, stop_event):
     while not stop_event.is_set():
         time.sleep(CHECK_INTERVAL_SEC)
+        
         alive = [p for p in active_list_ref if p.is_alive()]
         target = int(MAX_ROCKATAKA * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
         
+        # УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ
+        to_kill = len(alive) - target
+        if to_kill > 0:
+            processes_to_kill = alive[:to_kill]
+            for p in processes_to_kill:
+                if p.is_alive():
+                    p.terminate()
+                    p.join(timeout=GRACEFUL_STOP_DELAY)
+                    if p.is_alive(): 
+                        p.kill()
+            active_list_ref[:] = alive[to_kill:]
+            print(f"[ROCKATAKA-MANAGER] Killed {to_kill} excess listeners.")
+            
         all_slots = set(range(MAX_ROCKATAKA))
         occupied = set()
-        for p in alive:
+        for p in active_list_ref:
             try: occupied.add(active_list_ref.index(p))
             except ValueError: continue
         free = list(all_slots - occupied)
         
-        to_spawn = target - len(alive)
+        current_live = len([p for p in active_list_ref if p.is_alive()])
+        to_spawn = target - current_live
         if to_spawn > 0 and free:
             slots_to_fill = random.sample(free, min(to_spawn, len(free)))
             for slot_index in slots_to_fill:
@@ -185,17 +231,32 @@ def rockataka_manager_loop(active_list_ref, stop_event):
 def iridium_manager_loop(active_list_ref, stop_event):
     while not stop_event.is_set():
         time.sleep(CHECK_INTERVAL_SEC)
+        
         alive = [p for p in active_list_ref if p.is_alive()]
         target = int(MAX_IRIDIUM * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
         
+        # УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ
+        to_kill = len(alive) - target
+        if to_kill > 0:
+            processes_to_kill = alive[:to_kill]
+            for p in processes_to_kill:
+                if p.is_alive():
+                    p.terminate()
+                    p.join(timeout=GRACEFUL_STOP_DELAY)
+                    if p.is_alive(): 
+                        p.kill()
+            active_list_ref[:] = alive[to_kill:]
+            print(f"[IRIDIUM-MANAGER] Killed {to_kill} excess listeners.")
+            
         all_slots = set(range(MAX_IRIDIUM))
         occupied = set()
-        for p in alive:
+        for p in active_list_ref:
             try: occupied.add(active_list_ref.index(p))
             except ValueError: continue
         free = list(all_slots - occupied)
         
-        to_spawn = target - len(alive)
+        current_live = len([p for p in active_list_ref if p.is_alive()])
+        to_spawn = target - current_live
         if to_spawn > 0 and free:
             slots_to_fill = random.sample(free, min(to_spawn, len(free)))
             for slot_index in slots_to_fill:
@@ -221,7 +282,7 @@ if __name__ == "__main__":
     
     m1.start(); m2.start(); m3.start(); m4.start()
     
-    # ПЕРВИЧНАЯ ИНИЦИАЛИЗАЦИЯ (теперь использует прямые ссылки на глобальные константы)
+    # ПЕРВИЧНАЯ ИНИЦИАЛИЗАЦИЯ (заполнение до целевого значения текущего часа)
     init_sin = int(MAX_SINTEZI * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
     init_nev = int(MAX_NEVERMIND * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
     init_roc = int(MAX_ROCKATAKA * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
@@ -229,7 +290,6 @@ if __name__ == "__main__":
     
     print(f"[INIT] Starting at Sintezi:{init_sin} Nevermind:{init_nev} Rockataka:{init_roc} Iridium:{init_iri}")
     
-    # Надежная последовательная инициализация без условий и лямбд
     for _ in range(init_sin): 
         p = Process(target=keep_radio_alive, args=(RADIO_SINTEZI, REFERER_SINTEZI)); p.start(); manager_sintezi_active.append(p)
     for _ in range(init_nev): 
