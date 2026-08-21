@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from multiprocessing import Process, current_process
 import random
 from datetime import datetime, timezone
+from collections import Counter
 
 
 # --- ВАШИ НАСТРОЙКИ (МЕНЯЙТЕ ЗДЕСЬ) ---
@@ -91,10 +92,7 @@ def keep_radio_alive(url):
     while True:  
         session_duration = random.randint(SESSION_DURATION_MIN, SESSION_DURATION_MAX)
         try:
-            # Создаем базовое TCP-соединение на стандартный HTTPS-порт
             raw_sock = socket.create_connection((host, 443))
-            
-            # Оборачиваем его в слой шифрования SSL/TLS
             sock = ssl.wrap_socket(raw_sock)
             
             sock.settimeout(READ_TIMEOUT_SEC)
@@ -120,7 +118,6 @@ def keep_radio_alive(url):
         except Exception as e:
             print(f"[{time.strftime('%H:%M:%S')}] [{current_process().name}] Connection error for {url}: {e}. Reconnecting...")
         finally:
-            # Гарантированное закрытие сокета при любом исходе
             try:
                 sock.close()
             except Exception:
@@ -137,25 +134,73 @@ def get_target_listeners_for_now():
 
 def scheduler_manager(active_processes):
     alive_processes = [p for p in active_processes if p.is_alive()]
+    
     new_target, _ = get_target_listeners_for_now()
     max_possible_listeners = len(RADIOS)
     target_count = min(new_target, max_possible_listeners)
     current_live = len(alive_processes)
 
-    #### ДОБОР ПРОЦЕССОВ ####
+    #### ШАГ 1: Считаем текущую нагрузку по уникальным URL ####
+    live_urls = []
+    for p in alive_processes:
+        try:
+            live_urls.append(p._args[0])
+        except (AttributeError, IndexError):
+            continue
+            
+    current_counts = Counter(live_urls)
+    
+    unique_stations = list(dict.fromkeys(RADIOS)) 
+    total_weight = sum(unique_stations.count(url) for url in unique_stations)
+
+    #### ШАГ 2: Вычисляем идеальную пропорцию для КАЖДОЙ станции ####
+    targets_per_station = {}
+    for station_url in unique_stations:
+        weight = unique_stations.count(station_url)
+        ideal_count = int(target_count * (weight / total_weight))
+        targets_per_station[station_url] = ideal_count
+
+    #### ШАГ 3: ДОБОР ПРОЦЕССОВ строго по пропорции ####
     if to_spawn := target_count - current_live > 0:
-        free_slots = set(range(len(RADIOS))) - {active_processes.index(p) for p in alive_processes if p in active_processes}
-        slots_to_fill = random.sample(list(free_slots), min(to_spawn, len(free_slots)))
-        for slot_index in slots_to_fill:
-            radio_url = RADIOS[slot_index]
+        spawn_queue = []
+        
+        for station_url, ideal_count in targets_per_station.items():
+            have_now = current_counts.get(station_url, 0)
+            need_for_this_station = ideal_count - have_now
+            
+            if need_for_this_station > 0:
+                spawn_queue.extend([station_url] * need_for_this_station)
+                
+                if len(spawn_queue) >= to_spawn:
+                    break
+        
+        for radio_url in spawn_queue[:to_spawn]:
             p = Process(target=keep_radio_alive, args=(radio_url,))
             p.start()
-            active_processes.insert(slot_index, p)
-            print(f"[MANAGER] Spawned listener #{slot_index} -> {radio_url}")
+            alive_processes.append(p)
+            print(f"[MANAGER] Spawned listener -> {radio_url}")
 
-    #### УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ ####
+    #### ШАГ 4: УДАЛЕНИЕ ЛИШНИХ ПРОЦЕССОВ строго по пропорции ####
     elif current_live > target_count:
-        processes_to_kill = list(reversed(alive_processes))[:current_live - target_count]
+        processes_to_kill = []
+        
+        for i in range(len(alive_processes) - 1, -1, -1):
+            if len(processes_to_kill) >= current_live - target_count:
+                break
+            
+            p = alive_processes[i]
+            try:
+                proc_url = p._args[0]
+            except (AttributeError, IndexError):
+                continue
+
+            have_now = current_counts.get(proc_url, 0)
+            ideal_count = targets_per_station.get(proc_url, 0)
+            
+            if have_now > ideal_count:
+                processes_to_kill.append(p)
+                current_counts[proc_url] -= 1
+
         for p in processes_to_kill:
             if p.is_alive():
                 p.terminate()
@@ -163,9 +208,9 @@ def scheduler_manager(active_processes):
                 if p.is_alive():
                     p.kill()
         
-        active_processes = [p for p in active_processes if p not in processes_to_kill]
+        alive_processes = [p for p in alive_processes if p not in processes_to_kill]
 
-    return active_processes
+    return alive_processes
 
 
 if __name__ == "__main__":
