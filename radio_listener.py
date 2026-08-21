@@ -7,10 +7,9 @@ import random
 from datetime import datetime, timezone
 from collections import Counter
 
-
 # --- ВАШИ НАСТРОЙКИ (МЕНЯЙТЕ ЗДЕСЬ) ---
 
-# 1. Список станций. Дублируйте URL столько раз, сколько веса хотите дать станции.
+# 1. Список станций (фулл-лист софта)
 RADIOS = [
     *(['https://listen7.myradio24.com/sintezi'] * 31),
     *(['https://listen7.myradio24.com/nevermind'] * 30),
@@ -19,17 +18,27 @@ RADIOS = [
     *(['https://listen7.myradio24.com/63908'] * 30)
 ]
 
-# 2. Базовый сайт-реферер
+# 2. Словарь ВЕСОВ (используется для математически точного распределения)
+STATION_WEIGHTS = {
+    "https://listen7.myradio24.com/sintezi": 31,
+    "https://listen7.myradio24.com/nevermind": 30,
+    "https://listen7.myradio24.com/rockataka": 8,
+    "https://listen7.myradio24.com/iridium": 10,
+    "https://listen7.myradio24.com/63908": 30
+}
+TOTAL_BASE_WEIGHT = sum(STATION_WEIGHTS.values())  # Это число 109
+
+# 3. Базовый сайт-реферер
 REFERER_URL = "https://www.fmradiofree.com"
 
-# 3. Длительность сессии одного потока (в секундах)
+# 4. Длительность сессии одного потока (в секундах)
 SESSION_DURATION_MIN = 100   
 SESSION_DURATION_MAX = 1600  
 READ_TIMEOUT_SEC = 5        
 CHECK_INTERVAL_SEC = 300    
 GRACEFUL_STOP_DELAY = 120   
 
-# 4. Суточное расписание нагрузки (процент от общего количества слотов RADIOS)
+# 5. Суточное расписание нагрузки (процент от TOTAL_BASE_WEIGHT)
 TARGET_PERCENT_BY_HOUR = {
     0: 22, 1: 25, 2: 35, 3: 55, 4: 85, 5: 98, 6: 92, 7: 80,
     8: 75, 9: 78, 10: 76, 11: 74, 12: 77, 13: 82, 14: 90, 15: 100,
@@ -125,22 +134,27 @@ def keep_radio_alive(url):
 
 
 def get_target_listeners_for_now():
+    """
+    Получает целевое число слушателей как процент от суммы весов всех станций.
+    Возвращает цель и сам словарь весов для менеджера.
+    """
     utc_hour = datetime.now(timezone.utc).hour
     percent = TARGET_PERCENT_BY_HOUR[utc_hour]
-    base_listeners = len(RADIOS)
-    target_count = int(base_listeners * (percent / 100))
-    return target_count, base_listeners
+    
+    target_count = int(TOTAL_BASE_WEIGHT * (percent / 100))
+    return target_count, STATION_WEIGHTS
 
 
 def scheduler_manager(active_processes):
     alive_processes = [p for p in active_processes if p.is_alive()]
     
-    new_target, _ = get_target_listeners_for_now()
-    max_possible_listeners = len(RADIOS)
+    new_target, station_weights = get_target_listeners_for_now()
+    
+    max_possible_listeners = TOTAL_BASE_WEIGHT
     target_count = min(new_target, max_possible_listeners)
     current_live = len(alive_processes)
 
-    #### ШАГ 1: Считаем текущую нагрузку по уникальным URL ####
+    #### ШАГ 1: Считаем текущую нагрузку по URL ####
     live_urls = []
     for p in alive_processes:
         try:
@@ -149,15 +163,11 @@ def scheduler_manager(active_processes):
             continue
             
     current_counts = Counter(live_urls)
-    
-    unique_stations = list(dict.fromkeys(RADIOS)) 
-    total_weight = sum(unique_stations.count(url) for url in unique_stations)
 
-    #### ШАГ 2: Вычисляем идеальную пропорцию для КАЖДОЙ станции ####
+    #### ШАГ 2: Вычисляем идеальную квоту для КАЖДОЙ станции ####
     targets_per_station = {}
-    for station_url in unique_stations:
-        weight = unique_stations.count(station_url)
-        ideal_count = int(target_count * (weight / total_weight))
+    for station_url, weight in station_weights.items():
+        ideal_count = int(target_count * (weight / TOTAL_BASE_WEIGHT))
         targets_per_station[station_url] = ideal_count
 
     #### ШАГ 3: ДОБОР ПРОЦЕССОВ строго по пропорции ####
