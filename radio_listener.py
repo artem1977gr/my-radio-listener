@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 #### ОБЩИЕ НАСТРОЙКИ ####
 SESSION_DURATION_MIN = 100   
-SESSION_DURATION_MAX = 1500  
+SESSION_DURATION_MAX = 1600  
 READ_TIMEOUT_SEC = 5        
 CHECK_INTERVAL_SEC = 300     
 GRACEFUL_STOP_DELAY = 120    
