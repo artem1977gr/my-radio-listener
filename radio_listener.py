@@ -6,11 +6,11 @@ from multiprocessing import Process, Queue, Event, current_process
 from datetime import datetime, timezone
 
 #### ОБЩИЕ НАСТРОЙКИ ####
-SESSION_DURATION_MIN = 100   
-SESSION_DURATION_MAX = 1600  
-READ_TIMEOUT_SEC = 5        
-CHECK_INTERVAL_SEC = 300     
-GRACEFUL_STOP_DELAY = 120    
+SESSION_DURATION_MIN = 120
+SESSION_DURATION_MAX = 980
+READ_TIMEOUT_SEC = 5
+CHECK_INTERVAL_SEC = 300
+GRACEFUL_STOP_DELAY = 120
 
 # ЕДИНЫЙ ГРАФИК ДЛЯ ВСЕХ СТАНЦИЙ
 TARGET_PERCENT_BY_HOUR = {
@@ -22,11 +22,11 @@ TARGET_PERCENT_BY_HOUR = {
 # --- ГЛОБАЛЬНЫЕ КОНСТАНТЫ СТАНЦИЙ ---
 RADIO_SINTEZI = "https://listen7.myradio24.com/sintezi"
 REFERER_SINTEZI = "https://m.sintezi.ru"
-MAX_SINTEZI = 30
+MAX_SINTEZI = 20
 
 RADIO_NEVERMIND = "https://listen7.myradio24.com/nevermind"
 REFERER_NEVERMIND = "https://m.nevermind.ru"
-MAX_NEVERMIND = 25
+MAX_NEVERMIND = 15
 
 RADIO_ROCKATAKA = "https://listen7.myradio24.com/rockataka"
 REFERER_ROCKATAKA = "https://m.rockataka.ru"
