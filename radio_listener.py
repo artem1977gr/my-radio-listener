@@ -22,15 +22,15 @@ TARGET_PERCENT_BY_HOUR = {
 # --- ГЛОБАЛЬНЫЕ КОНСТАНТЫ СТАНЦИЙ ---
 RADIO_SINTEZI = "https://listen7.myradio24.com/sintezi"
 REFERER_SINTEZI = "https://m.sintezi.ru"
-MAX_SINTEZI = 5
+MAX_SINTEZI = 1
 
 RADIO_NEVERMIND = "https://listen7.myradio24.com/nevermind"
 REFERER_NEVERMIND = "https://m.nevermind.ru"
-MAX_NEVERMIND = 5
+MAX_NEVERMIND = 1
 
 RADIO_ROCKATAKA = "https://listen7.myradio24.com/rockataka"
 REFERER_ROCKATAKA = "https://m.rockataka.ru"
-MAX_ROCKATAKA = 5
+MAX_ROCKATAKA = 1
 
 RADIO_IRIDIUM = "https://listen7.myradio24.com/iridium"
 REFERER_IRIDIUM = "https://m.iridium.ru"
