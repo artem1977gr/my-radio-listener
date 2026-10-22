@@ -6,11 +6,11 @@ from multiprocessing import Process, Queue, Event, current_process
 from datetime import datetime, timezone
 
 #### ОБЩИЕ НАСТРОЙКИ ####
-SESSION_DURATION_MIN = 100   
-SESSION_DURATION_MAX = 1600  
-READ_TIMEOUT_SEC = 5        
-CHECK_INTERVAL_SEC = 300     
-GRACEFUL_STOP_DELAY = 120    
+SESSION_DURATION_MIN = 100
+SESSION_DURATION_MAX = 1601
+READ_TIMEOUT_SEC = 5
+CHECK_INTERVAL_SEC = 300
+GRACEFUL_STOP_DELAY = 120
 
 # ЕДИНЫЙ ГРАФИК ДЛЯ ВСЕХ СТАНЦИЙ
 TARGET_PERCENT_BY_HOUR = {
