@@ -26,15 +26,15 @@ MAX_SINTEZI = 15
 
 RADIO_NEVERMIND = "https://listen7.myradio24.com/nevermind"
 REFERER_NEVERMIND = "https://m.nevermind.ru"
-MAX_NEVERMIND = 15
+MAX_NEVERMIND = 1
 
 RADIO_ROCKATAKA = "https://listen7.myradio24.com/rockataka"
 REFERER_ROCKATAKA = "https://m.rockataka.ru"
-MAX_ROCKATAKA = 10
+MAX_ROCKATAKA = 1
 
 RADIO_IRIDIUM = "https://listen7.myradio24.com/iridium"
 REFERER_IRIDIUM = "https://m.iridium.ru"
-MAX_IRIDIUM = 10
+MAX_IRIDIUM = 1
 
 def generate_user_agent():
     PLATFORM_WEIGHTS = [{"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1}, {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
