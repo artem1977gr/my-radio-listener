@@ -22,19 +22,19 @@ TARGET_PERCENT_BY_HOUR = {
 # --- ГЛОБАЛЬНЫЕ КОНСТАНТЫ СТАНЦИЙ ---
 RADIO_SINTEZI = "https://listen7.myradio24.com/sintezi"
 REFERER_SINTEZI = "https://source-sintezi.ru"
-MAX_SINTEZI = 31
+MAX_SINTEZI = 10
 
 RADIO_NEVERMIND = "https://listen7.myradio24.com/nevermind"
 REFERER_NEVERMIND = "https://source-nevermind.ru"
-MAX_NEVERMIND = 30
+MAX_NEVERMIND = 1
 
 RADIO_ROCKATAKA = "https://listen7.myradio24.com/rockataka"
 REFERER_ROCKATAKA = "https://source-rockataka.ru"
-MAX_ROCKATAKA = 8
+MAX_ROCKATAKA = 1
 
 RADIO_IRIDIUM = "https://listen7.myradio24.com/iridium"
 REFERER_IRIDIUM = "https://source-iridium.ru"
-MAX_IRIDIUM = 10
+MAX_IRIDIUM = 1
 
 def generate_user_agent():
     PLATFORM_WEIGHTS = [{"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1}, {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
