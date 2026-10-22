@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 #### ОБЩИЕ НАСТРОЙКИ ####
 SESSION_DURATION_MIN = 100
 SESSION_DURATION_MAX = 1601
-READ_TIMEOUT_SEC = 5
+READ_TIMEOUT_SEC = 15  # Увеличено для стабильности на слабых сетях
 CHECK_INTERVAL_SEC = 300
 GRACEFUL_STOP_DELAY = 120
 
@@ -22,19 +22,19 @@ TARGET_PERCENT_BY_HOUR = {
 # --- ГЛОБАЛЬНЫЕ КОНСТАНТЫ СТАНЦИЙ ---
 RADIO_SINTEZI = "https://listen7.myradio24.com/sintezi"
 REFERER_SINTEZI = "https://source-sintezi.ru"
-MAX_SINTEZI = 20
+MAX_SINTEZI = 31
 
 RADIO_NEVERMIND = "https://listen7.myradio24.com/nevermind"
 REFERER_NEVERMIND = "https://source-nevermind.ru"
-MAX_NEVERMIND = 5
+MAX_NEVERMIND = 30
 
 RADIO_ROCKATAKA = "https://listen7.myradio24.com/rockataka"
 REFERER_ROCKATAKA = "https://source-rockataka.ru"
-MAX_ROCKATAKA = 5
+MAX_ROCKATAKA = 8
 
 RADIO_IRIDIUM = "https://listen7.myradio24.com/iridium"
 REFERER_IRIDIUM = "https://source-iridium.ru"
-MAX_IRIDIUM = 5
+MAX_IRIDIUM = 10
 
 def generate_user_agent():
     PLATFORM_WEIGHTS = [{"os": "Windows", "version": "NT 10.0; Win64; x64", "weight": 0.1}, {"os": "Mac OS X", "version": "10_15_7", "weight": 0.05},
@@ -85,41 +85,56 @@ def keep_radio_alive(url, referer_url):
     )
     while True:  
         session_duration = random.randint(SESSION_DURATION_MIN, SESSION_DURATION_MAX)
+        
+ # Инициализация до блока try для исключения UnboundLocalError
+        start_time = time.time()
+        sock = None
+        
         try:
-            with socket.create_connection((host, 80)) as sock:
-                sock.settimeout(READ_TIMEOUT_SEC)
-                sock.sendall(headers.encode())
-                
-                response_headers = b""
-                while True:
-                    chunk = sock.recv(4096)
-                    if not chunk or b"\r\n\r\n" in response_headers:
-                        break
-                    response_headers += chunk
+            sock = socket.create_connection((host, 80))
+            sock.settimeout(READ_TIMEOUT_SEC)
+            sock.sendall(headers.encode())
+            
+            response_headers = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk or b"\r\n\r\n" in response_headers:
+                    break
 
-                start_time = time.time()
-                proc_name = current_process().name
-                while int(time.time() - start_time) < session_duration:
-                    try:
-                        sock.recv(1024)
-                    except socket.timeout:
-                        pass
-                    except Exception as e:
-                        print(f"[{time.strftime('%H:%M:%S')}] [{proc_name}] Read error for {url}: {e}")
-                        break
+            # Обновляем таймер только после успешного подключения
+            start_time = time.time()
+            proc_name = current_process().name
+            while int(time.time() - start_time) < session_duration:
+                try:
+                    sock.recv(1024)
+                except socket.timeout:
+                    pass
+                except Exception as e:
+                    print(f"[{time.strftime('%H:%M:%S')}] [{proc_name}] Read error for {url}: {e}")
+                    break
         except Exception as e:
             print(f"[{time.strftime('%H:%M:%S')}] [{current_process().name}] Connection error for {url}: {e}. Reconnecting...")
         finally:
-            elapsed = int(time.time() - start_time)
-            mins, secs = divmod(elapsed, 60)
-            print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
+            # Безопасное закрытие сокета
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+            
+            # Логируем только те сессии, которые успели начаться
+            if start_time and start_time != time.time():
+                elapsed = int(time.time() - start_time)
+                mins, secs = divmod(elapsed, 60)
+                print(f"[{mins}:{secs:02d}] Listener on {url} ended.")
+            else:
+                print(f"[00:00] Listener on {url} failed to start.")
 
 # --- ИСПРАВЛЕННЫЕ МЕНЕДЖЕРЫ-ДЕМОНЫ ---
 
 def sintezi_manager_loop(command_queue, stop_event):
     active_listeners = []
     while not stop_event.is_set():
-        # Обработка входящих команд (создание слушателей) без блокировки основного цикла
         while True:
             try:
                 cmd = command_queue.get_nowait()
@@ -132,13 +147,11 @@ def sintezi_manager_loop(command_queue, stop_event):
             except Exception:
                 break
         
-        # Регулярная проверка баланса каждые 5 минут
         time.sleep(CHECK_INTERVAL_SEC)
         
         alive = [p for p in active_listeners if p.is_alive()]
         target = int(MAX_SINTEZI * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
         
-        # Убиваем лишних
         to_kill = len(alive) - target
         if to_kill > 0:
             processes_to_kill = alive[:to_kill]
@@ -147,7 +160,6 @@ def sintezi_manager_loop(command_queue, stop_event):
             active_listeners = alive[to_kill:]
             print(f"[SINTEZI-MANAGER] Killed {to_kill} excess listeners.")
             
-        # Добираем недостающих
         all_slots = set(range(MAX_SINTEZI))
         occupied = set()
         for p in alive:
@@ -162,7 +174,6 @@ def sintezi_manager_loop(command_queue, stop_event):
             for slot_index in slots_to_fill:
                 command_queue.put(("spawn", slot_index))
 
-# Остальные три менеджера идентичны по структуре
 def nevermind_manager_loop(command_queue, stop_event):
     active_listeners = []
     while not stop_event.is_set():
@@ -285,7 +296,6 @@ if __name__ == "__main__":
     
     m1.start(); m2.start(); m3.start(); m4.start()
     
-    # ПЕРВИЧНАЯ ИНИЦИАЛИЗАЦИЯ через команды с задержкой для старта ОС-процессов
     init_sin = int(MAX_SINTEZI * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
     init_nev = int(MAX_NEVERMIND * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
     init_roc = int(MAX_ROCKATAKA * (TARGET_PERCENT_BY_HOUR[datetime.now(timezone.utc).hour] / 100))
@@ -298,7 +308,6 @@ if __name__ == "__main__":
     for i in range(init_roc): q_roc.put(("spawn", i)); time.sleep(0.01)
     for i in range(init_iri): q_iri.put(("spawn", i)); time.sleep(0.01)
 
-    # Даем менеджерам секунду на первичный запуск всех детей перед первой проверкой
     time.sleep(1)
 
     try:
@@ -308,7 +317,6 @@ if __name__ == "__main__":
         print("\n[MAIN] Shutdown signal received.")
         stop_event.set()
         
-        # Чистим очереди, чтобы .get_nowait() не генерировал исключения после остановки
         for q in [q_sin, q_nev, q_roc, q_iri]:
             while not q.empty(): 
                 try: q.get_nowait()
